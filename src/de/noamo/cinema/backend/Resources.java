@@ -1,0 +1,50 @@
+/*
+ * Copyright (c) DHBW Mannheim - All Rights Reserved
+ * Unauthorized copying of this file, via any medium is strictly prohibited
+ * Proprietary and confidential
+ * Written by Noah Hoelterhoff <noah.hoelterhoff@gmail.com>, 9 2020
+ */
+
+package de.noamo.cinema.backend;
+
+import java.io.File;
+import java.util.Scanner;
+
+/**
+ * @author Noah Hoelterhoff
+ * @version 16.09.2020
+ * @since 16.09.2020
+ */
+public class Resources {
+    private static String activationMail;
+
+    public static String getActivationMail() {
+        return activationMail;
+    }
+
+    /**
+     * Liest eine Datei aus den Resourcen und kopiert Sie in einen String
+     *
+     * @param fileName Die Datei
+     * @return Ein String mit dem Inhalt der Datei. Line-Seperatoren sind Systemstandarts
+     */
+    private static String loadResourceIntoString(String fileName) throws Exception {
+        File file = new File(Mail.class.getResource(fileName).toURI());
+        StringBuilder stringBuilder = new StringBuilder();
+        try (Scanner scanner = new Scanner(file)) {
+            while (scanner.hasNextLine()) {
+                stringBuilder.append(scanner.nextLine()).append(System.lineSeparator());
+            }
+        }
+        return stringBuilder.toString();
+    }
+
+    /**
+     * Lädt alle Resourcen, die verwendet werden in diese Klasse.
+     *
+     * @throws Exception Falls Fehler bei dem Laden auftreten
+     */
+    static void loadResources() throws Exception {
+        activationMail = loadResourceIntoString("/mails/ActivationMail.html");
+    }
+}

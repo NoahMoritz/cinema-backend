@@ -7,6 +7,8 @@
 
 package de.noamo.cinema.backend;
 
+import com.google.gson.Gson;
+import com.google.gson.JsonObject;
 import org.java_websocket.WebSocket;
 import org.java_websocket.handshake.ClientHandshake;
 import org.java_websocket.server.WebSocketServer;
@@ -19,6 +21,7 @@ import java.net.InetSocketAddress;
  * @since 05.09.2020
  */
 public class Server extends WebSocketServer {
+    private Gson gson;
 
     public Server(InetSocketAddress adress) {
 
@@ -35,8 +38,8 @@ public class Server extends WebSocketServer {
     }
 
     @Override
-    public void onMessage(WebSocket conn, String message) {
-
+    public void onMessage(WebSocket conn, String stringMessage) {
+        JsonObject jsonMessage = gson.fromJson(stringMessage, JsonObject.class);
     }
 
     @Override

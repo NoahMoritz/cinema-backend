@@ -1,0 +1,19 @@
+### Einen Test-Account erstellen
+POST http://localhost:4567/cinema-backend/create-account
+Content-Type: application/json
+
+{
+  "name": "Max Mustermann",
+  "passwort": "123456789",
+  "email": "noah.hoelterhoff@gmail.com"
+}
+
+### Einen zweiten Account mit der selben Email erstellen
+POST http://localhost:4567/cinema-backend/create-account
+Content-Type: : application/json
+
+{
+  "name": "Test Benutzer",
+  "passwort": "123456789",
+  "email": "noah.hoelterhoff@gmail.com"
+}
