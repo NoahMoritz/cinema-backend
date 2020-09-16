@@ -29,17 +29,20 @@ public class RestServer {
     private final static int SERVER_ERROR = 500;
     private final static Gson gson = new Gson();
 
+    /**
+     * Regelt GET-Anfragen für die Aktivierungsseite.
+     */
     private static void setupActivate() {
         get("/cinema-backend/activate/:key", ((request, response) -> {
             try {
                 DataBase.activateAccount(request.params("key"));
-                return "Ihr Account wurde erfolgreich aktiviert";
+                return Resources.getActivationSite("WILLKOMMEN", "Ihr Konto ist nun aktiviert");
             } catch (ParameterException ex) {
                 response.status(BAD_REQUEST);
-                return "Ungültige Anfrage!";
+                return Resources.getActivationSite("UNGÜLTIG", "Der Aktiverungslink hat ein ungültiges Format");
             } catch (InvalidException ex) {
                 response.status(FORBIDDEN);
-                return "<html><center>Der Aktivierungscode ist ungültig oder wurde bereits aktiviert.</center></html>";
+                return Resources.getActivationSite("UNGÜLTIG", "Der Aktivierungslink ist ungültig oder wurde bereits verwendet");
             }
         }));
     }

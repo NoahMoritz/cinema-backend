@@ -14,6 +14,8 @@ import org.simplejavamail.email.EmailBuilder;
 import org.simplejavamail.mailer.MailerBuilder;
 
 /**
+ * Diese Klasse ist für alle Interaktionen mit Emails (senden, empfangen, etc.) zuständig
+ *
  * @author Noah Hoelterhoff
  * @version 16.09.2020
  * @since 15.09.2020
@@ -24,7 +26,8 @@ abstract class Mail {
 
     static void sendActivationMail(final String pEmail, final String pName, final String pAktivierungsSchluessel) {
         Email mail = EmailBuilder.startingBlank().to(pName, pEmail).withSubject("Capitol Cinema - Aktivierungscode").
-                withHTMLText(Resources.getActivationMail().replaceAll("REPLACE_WITH_LINK", "http://localhost:4567/cinema-backend/activate/" + pAktivierungsSchluessel)).
+                withHTMLText(Resources.getActivationMail("http://" + Start.getHost() + ":" + Start.getRestApiPort() +
+                        "/cinema-backend/activate/" + pAktivierungsSchluessel)).
                 from("Capitol Cinema", emailAdresse).buildEmail();
         Mailer mailer = MailerBuilder.withSMTPServer(emailHost, emailPort, emailAdresse, emailPasswort).
                 withTransportStrategy(TransportStrategy.SMTP_TLS).buildMailer();

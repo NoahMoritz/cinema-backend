@@ -11,13 +11,27 @@ package de.noamo.cinema.backend;
  * Einstieg in das Programm. Hier werden alle Dienste (die zu dem Backend gehören) gestartet.
  *
  * @author Noah Hoelterhoff
- * @version 05.09.2020
+ * @version 16.09.2020
  * @since 05.09.2020
  */
 public abstract class Start {
-    private final static String HOST = "localhost";
-    private final static int REST_PORT = 4567;
     private final static int WEBSOCKET_PORT = 56953;
+    private static String host = "localhost";
+    private static int restApiPort = 4567;
+
+    /**
+     * Fragt den Host ab, auf dem der Server läuft.
+     */
+    public static String getHost() {
+        return host;
+    }
+
+    /**
+     * Fragt den Port ab, auf der die REST API arbeitet.
+     */
+    public static int getRestApiPort() {
+        return restApiPort;
+    }
 
     /**
      * Lädt alle Resourcen, die während der Laufzeit benötigt werden
@@ -29,6 +43,7 @@ public abstract class Start {
         } catch (Exception e) {
             log(2, "Es konnten nicht alle Resourcen geladen werden (" + e.getMessage() + ")");
             log(0, "Das Programm wird nun beendet...");
+            System.exit(1);
         }
     }
 
@@ -50,10 +65,16 @@ public abstract class Start {
     public static void main(String[] args) throws InterruptedException {
         // args lesen
         String dbUrl = null;
-        for (String s : args) {
-            if (s.toUpperCase().startsWith("DB=")) dbUrl = s.substring(3);
-            if (s.toUpperCase().startsWith("MAIL=")) setupMail(s.substring(5));
-            // Platz für mögliche Erweiterungen der args
+        try {
+            for (String s : args) {
+                if (s.toUpperCase().startsWith("DB=")) dbUrl = s.substring(3);
+                if (s.toUpperCase().startsWith("MAIL=")) setupMail(s.substring(5));
+                if (s.toUpperCase().startsWith("RESTPORT=")) restApiPort = Integer.parseInt(s.substring(9));
+                if (s.toUpperCase().startsWith("HOST=")) host = s.substring(5);
+            }
+        } catch (Exception e) {
+            log(2, "Argumente konnten nicht gelesen werden (" + e.getClass().toString() + ": " + e.getMessage() + ")");
+            System.exit(1);
         }
 
         // Laden & Starten
@@ -107,7 +128,7 @@ public abstract class Start {
     private static void waitForRestApi() throws InterruptedException {
         while (true) {
             try {
-                RestServer.start(REST_PORT);
+                RestServer.start(restApiPort);
                 log(1, "Die REST API wurde gestartet");
                 break;
             } catch (Exception e) {

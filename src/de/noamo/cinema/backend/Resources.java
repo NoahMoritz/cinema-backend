@@ -17,9 +17,14 @@ import java.util.Scanner;
  */
 public class Resources {
     private static String activationMail;
+    private static String activationSite;
 
-    public static String getActivationMail() {
-        return activationMail;
+    public static String getActivationMail(String link) {
+        return activationMail.replaceAll("REPLACE_WITH_LINK", link);
+    }
+
+    public static String getActivationSite(String title, String subtitle) {
+        return activationSite.replace("REPLACE_TITLE", title).replace("REPLACE_SUBTITLE", subtitle);
     }
 
     /**
@@ -46,5 +51,6 @@ public class Resources {
      */
     static void loadResources() throws Exception {
         activationMail = loadResourceIntoString("/mails/ActivationMail.html");
+        activationSite = loadResourceIntoString("/sites/ActivationSite.html");
     }
 }
