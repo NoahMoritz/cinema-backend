@@ -1,0 +1,2 @@
+### Einen Test-Account erstellen
+GET http://localhost:4567/cinema-backend/get-movies

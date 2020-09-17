@@ -47,11 +47,28 @@ public class RestServer {
         }));
     }
 
+    private static void enableCORS() {
+        options("/*", (request, response) -> {
+            String accessControlRequestHeaders = request.headers("Access-Control-Request-Headers");
+            if (accessControlRequestHeaders != null) {
+                response.header("Access-Control-Allow-Headers",
+                        accessControlRequestHeaders);
+            }
+            String accessControlRequestMethod = request.headers("Access-Control-Request-Method");
+            if (accessControlRequestMethod != null) {
+                response.header("Access-Control-Allow-Methods", accessControlRequestMethod);
+            }
+            return "OK";
+        });
+        before((request, response) -> response.header("Access-Control-Allow-Origin", "*"));
+    }
+
     /**
      * Regelt POST-Anfragen für das Erstellen eines Kontos
      */
     private static void setupCreateAccount() {
         post("/cinema-backend/create-account", ((request, response) -> {
+            response.type("text/plain; charset=utf-8");
             try {
                 JsonObject json = gson.fromJson(request.body(), JsonObject.class);
                 DataBase.createUser(json.get("passwort").getAsString(), json.get("email").getAsString(), json.get("name").getAsString());
@@ -72,6 +89,13 @@ public class RestServer {
         }));
     }
 
+    private static void setupGetMovies() {
+        get("/cinema-backend/get-movies", ((request, response) -> {
+            response.type("text/json; charset=utf-8");
+            return DataBase.getAllMovies();
+        }));
+    }
+
     /**
      * Startet den Server auf einem bestimmten Port.
      *
@@ -79,7 +103,9 @@ public class RestServer {
      */
     public static void start(int port) {
         port(port);
+        enableCORS();
         setupCreateAccount();
         setupActivate();
+        setupGetMovies();
     }
 }
