@@ -1,7 +1,8 @@
 <?xml version="1.0"?>
 
-<project name="CinemaBackend" default="JavaDoc">
+<project name="CinemaBackend">
     <property name="src" location="src"/>
+    <property name="srcUploader" location="Uploader/src"/>
     <property name="docs" value="docs"/>
 
     <target name="JavaDoc" description="Generate the JavaDocs for this Project">
@@ -12,6 +13,11 @@
         <mkdir dir="${docs}"/>
 
         <!-- Generate JavaDoc -->
-        <javadoc sourcepath="${src}" destdir="${docs}" windowtitle="${ant.project.name}"/>
+        <javadoc destdir="${docs}" windowtitle="${ant.project.name}">
+            <sourcepath>
+                <pathelement path="src"/>
+                <pathelement path="Uploader/src"/>
+            </sourcepath>
+        </javadoc>
     </target>
 </project>
