@@ -16,7 +16,7 @@ package de.noamo.cinema.backend;
  */
 public abstract class Start {
     private final static int WEBSOCKET_PORT = 56953;
-    private static String host = "localhost";
+    private static String host = "noamo.de";
     private static int restApiPort = 4567;
 
     /**

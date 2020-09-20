@@ -7,7 +7,6 @@
 
 package de.noamo.cinema.backend;
 
-import java.io.File;
 import java.util.Scanner;
 
 /**
@@ -34,9 +33,8 @@ public class Resources {
      * @return Ein String mit dem Inhalt der Datei. Line-Seperatoren sind Systemstandarts
      */
     private static String loadResourceIntoString(String fileName) throws Exception {
-        File file = new File(Mail.class.getResource(fileName).toURI());
         StringBuilder stringBuilder = new StringBuilder();
-        try (Scanner scanner = new Scanner(file)) {
+        try (Scanner scanner = new Scanner(Mail.class.getResourceAsStream(fileName))) {
             while (scanner.hasNextLine()) {
                 stringBuilder.append(scanner.nextLine()).append(System.lineSeparator());
             }

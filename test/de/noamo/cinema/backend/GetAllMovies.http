@@ -1,2 +1,2 @@
-### Einen Test-Account erstellen
-GET http://localhost:4567/cinema-backend/get-movies
+### Alle Filme abfragen
+GET http://noamo.de:4567/cinema-backend/get-movies

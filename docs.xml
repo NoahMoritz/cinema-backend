@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+
+<project name="CinemaBackend" default="JavaDoc">
+    <property name="src" location="src"/>
+    <property name="docs" value="docs"/>
+
+    <target name="JavaDoc" description="Generate the JavaDocs for this Project">
+        <!-- Remove previous Docs -->
+        <delete includeEmptyDirs="true" failonerror="false">
+            <fileset dir="${docs}"/>
+        </delete>
+        <mkdir dir="${docs}"/>
+
+        <!-- Generate JavaDoc -->
+        <javadoc sourcepath="${src}" destdir="${docs}" windowtitle="${ant.project.name}"/>
+    </target>
+</project>

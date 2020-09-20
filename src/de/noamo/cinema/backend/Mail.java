@@ -7,6 +7,7 @@
 
 package de.noamo.cinema.backend;
 
+
 import org.simplejavamail.api.email.Email;
 import org.simplejavamail.api.mailer.Mailer;
 import org.simplejavamail.api.mailer.config.TransportStrategy;

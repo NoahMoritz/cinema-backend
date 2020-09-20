@@ -27,7 +27,6 @@ public class DataBase {
     private final static int MOVIE_LIST_TTL = 1800000;
     private static BasicDataSource basicDataSource;
     private static CacheObject movies;
-    private static CacheObject recommendedMovies;
 
     /**
      * Die Methode aktiviert einen Account mit einem Aktivierungsschlüssel, der per Mail verschickt wurde.
@@ -145,6 +144,7 @@ public class DataBase {
                 "filmid INT UNSIGNED NOT NULL AUTO_INCREMENT, " +
                 "name VARCHAR(100) NOT NULL, " +
                 "bild_link TEXT NOT NULL, " +
+                "hintergrund_bild_link TEXT NOT NULL, " +
                 "trailer_youtube TEXT NOT NULL, " +
                 "kurze_beschreibung TEXT NOT NULL, " +
                 "beschreibung TEXT NOT NULL, " +
@@ -186,6 +186,7 @@ public class DataBase {
                 temp.addProperty("filmid", resultSet.getInt("filmid"));
                 temp.addProperty("name", resultSet.getString("name"));
                 temp.addProperty("bild_link", resultSet.getString("bild_link"));
+                temp.addProperty("hintergrund_bild_link", resultSet.getString("hintergrund_bild_link"));
                 temp.addProperty("trailer_youtube", resultSet.getString("trailer_youtube"));
                 temp.addProperty("kurze_beschreibung", resultSet.getString("kurze_beschreibung"));
                 temp.addProperty("beschreibung", resultSet.getString("beschreibung"));
