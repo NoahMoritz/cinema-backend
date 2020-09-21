@@ -8,12 +8,19 @@
 package de.noamo.cinema.backend.exceptions;
 
 /**
+ * Fehlerklasse für Werte, die ungültig sind.
+ *
  * @author Noah Hoelterhoff
- * @version 15.09.2020
+ * @version 21.09.2020
  * @since 15.09.2020
  */
 public class InvalidException extends Exception {
-    public InvalidException(String message) {
-        super(message);
+    /**
+     * Erstellt eine neue {@link InvalidException} mit konfigurierbarer Fehlermeldung.
+     *
+     * @param pMessage Fehlermeldung (genauen Grund angeben)
+     */
+    public InvalidException(String pMessage) {
+        super(pMessage);
     }
 }

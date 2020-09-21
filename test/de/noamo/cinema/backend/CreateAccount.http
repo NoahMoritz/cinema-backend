@@ -1,5 +1,5 @@
 ### Einen Test-Account erstellen
-POST https://cinema.noamo.de:4567/cinema-backend/create-account
+POST https://cinema.noamo.de:4567/create-account
 Content-Type: application/json
 
 {
@@ -9,7 +9,7 @@ Content-Type: application/json
 }
 
 ### Einen zweiten Account mit der selben Email erstellen
-POST https://cinema.noamo.de:4567/cinema-backend/create-account
+POST https://cinema.noamo.de:4567/create-account
 Content-Type: : application/json
 
 {

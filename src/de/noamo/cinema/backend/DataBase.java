@@ -19,20 +19,27 @@ import java.text.Normalizer;
 import java.util.UUID;
 
 /**
+ * Ist zuständig für die Verbindung zur Datenbank und für Aktionen, die dort ausgeführt werden. Die Verbindungen werden
+ * mit in einem Connection-Pool verwaltet ({@link BasicDataSource}).
+ *
  * @author Noah Hoelterhoff
- * @version 15.09.2020
+ * @version 21.09.2020
  * @since 05.09.2020
  */
-public class DataBase {
-    private final static int MOVIE_LIST_TTL = 1800000;
+abstract class DataBase {
+    private final static int DPCP2_MAX_CON_IDLE = 6;
+    private final static int DPCP2_MAX_OPEN_STATEMENTS = 50;
+    private final static int DPCP2_MIN_CON_IDLE = 1;
+    private final static int TTL_MOVIE_LIST = 1800000;
     private static BasicDataSource basicDataSource;
     private static CacheObject movies;
 
     /**
-     * Die Methode aktiviert einen Account mit einem Aktivierungsschlüssel, der per Mail verschickt wurde.
+     * Die Methode aktiviert einen Account mit einem Aktivierungsschlüssel. Dieser Aktiverungsschlüssel befindet sich in
+     * der Datenbank in der Tabelle "aktiverungsSchluessel".
      *
      * @param pAktivierungsSchluessel Der Aktivierungsschlüssel
-     * @throws ParameterException Falls der Schlüssel ein ungültiges Format hat
+     * @throws ParameterException Falls der Schlüssel ein ungültiges Format hat (kein 36 Zeichen)
      * @throws SQLException       Falls ein Problem in der Verbindung zu der Datenbank vorliegt
      * @throws InvalidException   Falls der Schlüssel nicht existiert (oder bereits aktiviert wurde)
      */
@@ -56,64 +63,67 @@ public class DataBase {
      * Stellt eine Verbindung zu der Datenbank her und erstellt ggf. fehlende Tabellen in dieser (über die Methode
      * {@link DataBase#dataBaseSetup(Connection)})
      *
-     * @param url Die vollständige JDBC-URL der Datenbank (inkl. Passwort, Username, etc.)
+     * @param pUrl Die vollständige JDBC-URL der Datenbank (inkl. Passwort, Username, etc.)
      * @throws SQLException Falls keine Verbindung hergestellt werden kann oder beim Setup Probleme auftreten
      */
-    static void connect(String url) throws SQLException {
-        try (Connection connection = DriverManager.getConnection(url)) {
+    static void connect(String pUrl) throws SQLException {
+        try (Connection connection = DriverManager.getConnection(pUrl)) {
             dataBaseSetup(connection);
         }
 
         basicDataSource = new BasicDataSource();
-        basicDataSource.setUrl(url);
+        basicDataSource.setUrl(pUrl);
         basicDataSource.setValidationQuery("SELECT benutzerid FROM konten");
-        basicDataSource.setMinIdle(1);
-        basicDataSource.setMaxIdle(5);
-        basicDataSource.setMaxOpenPreparedStatements(50);
+        basicDataSource.setMinIdle(DPCP2_MIN_CON_IDLE);
+        basicDataSource.setMaxIdle(DPCP2_MAX_CON_IDLE);
+        basicDataSource.setMaxOpenPreparedStatements(DPCP2_MAX_OPEN_STATEMENTS);
     }
 
     /**
-     * Mit dieser Methode kann ein Benutzerkonto erstellt werden. Ebenfalls wird dadurch einen Aktivierungsemail
-     * gesendet.
+     * Mit dieser Methode kann ein Benutzerkonto erstellt werden. Das Konto ist nach der Erstellung noch nicht
+     * aktiviert. Es wird allerdings ein Aktiverungscode hinterlegt, der mit der {@link
+     * DataBase#activateAccount(String)}-Methode zur Aktiverung verwendet werden kann. Dieser Code wird als String
+     * zurück gegeben.
      *
-     * @param passwort Das Passwort im Klartext
-     * @param email    Eine eindeutige Email-Adresse für dieses Konto
-     * @param name     Der Name der Person, der dieses Konto gehört
+     * @param pPasswort Das Passwort im Klartext
+     * @param pEmail    Eine eindeutige Email-Adresse für dieses Konto
+     * @param pName     Der Name der Person, der dieses Konto gehört
+     * @return Der Aktivierungscode, mit dem dieses Konto aktiviert werden kann
      * @throws SQLException                             Falls ein Problem in der Verbindung zu der Datenbank vorliegt
      * @throws SQLIntegrityConstraintViolationException Falls die Email bereits in der Datenbank vorhanden ist
      * @throws ParameterException                       Falls ein Parameter nicht den Vorgaben entspricht
      */
-    static void createUser(String passwort, String email, String name) throws SQLException, ParameterException, SQLIntegrityConstraintViolationException {
+    static String createUser(String pPasswort, String pEmail, String pName) throws SQLException, ParameterException, SQLIntegrityConstraintViolationException {
         // Parameterprüfung
-        if (passwort.length() <= 8) throw new ParameterException("Das Passwort muss mehr als 8 Zeichen haben!");
-        if (!email.matches("^(.+)@(.+)$"))
+        if (pPasswort.length() <= 8) throw new ParameterException("Das Passwort muss mehr als 8 Zeichen haben!");
+        if (!pEmail.matches("^(.+)@(.+)$"))
             throw new ParameterException("Die eingegebene Email-Adresse ist ungültig!");
-        if (name.length() <= 5)
+        if (pName.length() <= 5)
             throw new ParameterException("Bitte geben Sie Ihren vollständigen Namen (Vor- und Nachname) ein!");
 
         // Konto hinzufügen
         try (Connection connection = basicDataSource.getConnection();
              PreparedStatement preparedStatement1 = connection.prepareStatement("INSERT INTO konten(passwort, email, name) " +
-                     "VALUES ('" + DigestUtils.md5Hex(passwort) + "', '" + email + "', '" + name + "');")) {
+                     "VALUES ('" + DigestUtils.md5Hex(pPasswort) + "', '" + pEmail + "', '" + pName + "');")) {
             preparedStatement1.executeUpdate();
             String uuid = UUID.randomUUID().toString();
             try (PreparedStatement preparedStatement2 = connection.prepareStatement("INSERT INTO aktivierungsSchluessel(" +
-                    "benutzerid, aktivierungs_schluessel) VALUES ((SELECT benutzerid FROM konten WHERE email = '" + email +
+                    "benutzerid, aktivierungs_schluessel) VALUES ((SELECT benutzerid FROM konten WHERE email = '" + pEmail +
                     "'), '" + uuid + "');")) {
                 preparedStatement2.executeUpdate();
-                Mail.sendActivationMail(email, name, uuid);
+                return uuid;
             }
         }
     }
 
     /**
      * Erstellt die benötigen Tabellen, falls diese noch nicht existieren. Ebenfalls wird ein initialer Admin Account
-     * erstellt, der dafür da ist, das Admin Panl zu öffnen und die Starteinstellungen vor zu nehmen
+     * erstellt, der dafür da ist, das Admin Panl zu öffnen und die Starteinstellungen vor zu nehmen.
      *
-     * @param connection Die Verbindung zu der Datenbank
+     * @param pConnection Die Verbindung zu der Datenbank
      */
-    private static void dataBaseSetup(Connection connection) throws SQLException {
-        connection.prepareStatement("CREATE TABLE IF NOT EXISTS konten(" +
+    private static void dataBaseSetup(Connection pConnection) throws SQLException {
+        pConnection.prepareStatement("CREATE TABLE IF NOT EXISTS konten(" +
                 "benutzerid INT NOT NULL AUTO_INCREMENT, " + // Eindeutige ID des Benutzers
                 "rolle INT NOT NULL DEFAULT 0, " + // Rolle des Nutzers (spielt für den Zugriff eine Rolle)
                 "aktiv BIT NOT NULL DEFAULT 0," + // Ob das Konto aktiviert wurde
@@ -124,12 +134,13 @@ public class DataBase {
                 "PRIMARY KEY (benutzerid), " + // Eindeutige ID des Benutzers als Key
                 "UNIQUE (email));").executeUpdate();
 
-        connection.prepareStatement("CREATE TABLE IF NOT EXISTS aktivierungsSchluessel(benutzerid INT NOT NULL, " + // Eindeutige ID des Benutzers
-                "aktivierungs_schluessel VARCHAR(36) NOT NULL, " + // Aktivierungsschlüssel für das Konto
+        pConnection.prepareStatement("CREATE TABLE IF NOT EXISTS aktivierungsSchluessel(benutzerid INT NOT NULL, " + // Eindeutige ID des Benutzers
+                "aktivierungs_schluessel VARCHAR(36) NOT NULL, " +
+                "erstellt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, " + // Aktivierungsschlüssel für das Konto
                 "UNIQUE (aktivierungs_schluessel), " + // Ein Aktivierungsschlüssel muss eindeutig sein
                 "FOREIGN KEY (benutzerid) REFERENCES konten(benutzerid))").executeUpdate();
 
-        connection.prepareStatement("CREATE TABLE IF NOT EXISTS adressen(" +
+        pConnection.prepareStatement("CREATE TABLE IF NOT EXISTS adressen(" +
                 "benutzerid INT NOT NULL, " + // Eindeutige ID des Benutzers, zu dem dise Adresse gehört
                 "erstellt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, " + // Zeitpunkt des Hinzufügens der Adresse
                 "anrede VARCHAR(30) NOT NULL, " + // Anrede ("Herr"/"Frau" + ggf. "Dr." oder "Prof.) der Person an der Rechnungsadresse
@@ -140,7 +151,7 @@ public class DataBase {
                 "telefon VARCHAR(20), " + // Telefonnummer der Rechnungsadresse
                 "FOREIGN KEY (benutzerid) REFERENCES konten(benutzerid));").executeUpdate();
 
-        connection.prepareStatement("CREATE TABLE IF NOT EXISTS filme(" +
+        pConnection.prepareStatement("CREATE TABLE IF NOT EXISTS filme(" +
                 "filmid INT UNSIGNED NOT NULL AUTO_INCREMENT, " +
                 "name VARCHAR(100) NOT NULL, " +
                 "bild_link TEXT NOT NULL, " +
@@ -155,7 +166,7 @@ public class DataBase {
                 "empfohlen BIT NOT NULL DEFAULT 0, " +
                 "PRIMARY KEY (filmid));").executeUpdate();
 
-        try (PreparedStatement ps_adminAccount = connection.prepareStatement("INSERT INTO konten(passwort, name, " +
+        try (PreparedStatement ps_adminAccount = pConnection.prepareStatement("INSERT INTO konten(passwort, name, " +
                 "email, rolle, aktiv) VALUES ('" + DigestUtils.md5Hex("Initial") + "', 'Admin', 'info@noamo.de', 999, 1);")) {
             ps_adminAccount.executeUpdate();
         } catch (SQLIntegrityConstraintViolationException ignored) {} // Tritt immer auf, wenn der Admin Account schon existiert
@@ -199,13 +210,16 @@ public class DataBase {
             }
 
             // Neues JsonObjekt in den Cache speichern
-            movies = new CacheObject(json, MOVIE_LIST_TTL);
+            movies = new CacheObject(json, TTL_MOVIE_LIST);
         } catch (SQLException e) {
             Start.log(2, "Die Filmliste konnte nicht abgefragt werden! (" + e.getMessage() + ")");
         }
         return movies.json;
     }
 
+    /**
+     * Ein Cache-Objekt beinhaltet
+     */
     private static class CacheObject {
         private final long aliveUntil;
         private final String json;

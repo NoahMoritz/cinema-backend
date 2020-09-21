@@ -8,7 +8,6 @@
 package de.noamo.util;
 
 import net.schmizz.sshj.SSHClient;
-import net.schmizz.sshj.connection.channel.direct.Session;
 import net.schmizz.sshj.sftp.SFTPClient;
 import net.schmizz.sshj.transport.verification.PromiscuousVerifier;
 import net.schmizz.sshj.xfer.FileSystemFile;
@@ -22,18 +21,26 @@ import java.io.IOException;
  * Sie daher sicher, dass der Service damit läuft.
  *
  * @author Noah Hoelterhoff
- * @version 20.09.2020
+ * @version 21.09.2020
  * @since 20.09.2020
  */
 public abstract class Uploader {
     private static String hostname, username, password, pathExternal, pathLocal, serviceName;
     private static SSHClient ssh;
 
+    /**
+     * Führt auf dem Server einen {@code systemctl}-Befehl zu dem Service aus (Möglich ist: start, stop, restart, etc.)
+     */
     private static void changeServiceStatus(String function) throws IOException {
-        Session.Command cmd = ssh.startSession().exec("systemctl " + function + " " + serviceName);
+        ssh.startSession().exec("systemctl " + function + " " + serviceName);
         System.out.println("Service: " + function);
     }
 
+    /**
+     * Stellt eine SSH-Verbindung zu dem Server her.
+     *
+     * @throws IOException Falls keine Verbindung hergestellt werden kann
+     */
     private static void connect() throws IOException {
         // Connect
         ssh = new SSHClient();
@@ -87,6 +94,11 @@ public abstract class Uploader {
         }
     }
 
+    /**
+     * Lädt die angegenen Datei auf den angegeben Pfad hoch.
+     *
+     * @throws IOException Falls die lokale Datei nicht verwendet werden kann
+     */
     private static void upload() throws IOException {
         SFTPClient sftp = ssh.newSFTPClient();
         System.out.println("Starting upload...");

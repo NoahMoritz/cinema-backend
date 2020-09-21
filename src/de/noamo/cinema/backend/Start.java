@@ -19,13 +19,13 @@ import java.util.Scanner;
  * @since 05.09.2020
  */
 public abstract class Start {
-    private final static int WEBSOCKET_PORT = 56953;
     private static String certificatePath;
     private static String host;
     private static int restApiPort = 4567;
+    private static int websocketPort = 56953;
 
     /**
-     * Fragt den KeyStorePath ab. Dieser gibt an, wo die Schlüssel für die Zertifikate der Domain liegen.
+     * Fragt den Path des Zertifikates ab.
      */
     static String getCertificatePath() {
         return certificatePath;
@@ -46,7 +46,44 @@ public abstract class Start {
     }
 
     /**
-     * Lädt alle Resourcen, die während der Laufzeit benötigt werden
+     * Interpretiert den mitgegeben Pfad des Zertifikates. Dieser kann entweder direkt den Pfad zu dem Zertifikat
+     * enthalten, oder ein Pfad zu einer "last_nginx.conf"-Datei sein.<br> Falls es die "last_nginx.conf"-Datei ist,
+     * wird diese interpretiert und der Speicherort des Zertifikates aus dieser ausgelsen.<br><br>
+     * <b>Wichtig:</b> Das Auslesen der "last_nginx.conf"-Datei funktioniert nur auf Unix Systemen.
+     *
+     * @param pPath Pfad zu dem Zertifikat oder der "last_nginx.conf"-Datei
+     * @return Der Pfad zu dem Zertifikat (oder null, falls ein Fehler auftritt
+     * @throws IOException Falls die "last_nginx.conf"-Datei nicht verarbeitet werden konnte
+     */
+    private static String interpretCertificatePath(String pPath) throws IOException {
+        // Prüfen, ob Datei existiert
+        File temp = new File(pPath);
+        if (!temp.exists() || !temp.isFile()) {
+            log(2, "Zertifikat konnte nicht geladen werden (Datei wurde nicht gefunden). Es wird daher kein Zertifikat verwendet!");
+            return null;
+        }
+
+        // Prüfen, ob Datei den dirketen Pfad enthält
+        if (!temp.getName().equals("last_nginx.conf")) return pPath;
+
+        // nginx interpretieren (nur Unix)
+        log(0, "Zertifikat-Argument als nginx Konigurationsdatei erkannt");
+        Scanner scanner = new Scanner(temp);
+        while (scanner.hasNextLine()) {
+            String line = scanner.nextLine();
+            if (line.contains("ssl_certificate")) {
+                line = line.split("/", 2)[1];
+                line = "/" + line.substring(0, line.length() - 1);
+                log(0, "Erkannter Pfad des Zertifikates: " + line);
+                return line;
+            }
+        }
+        log(2, "\"last_nginx.conf\"-Datei konnte nicht interpretiert werden. Es wird daher kein Zertifikat verwendet!");
+        return null;
+    }
+
+    /**
+     * Lädt alle Resourcen, die während der Laufzeit benötigt werden.
      */
     private static void loadResources() {
         try {
@@ -59,41 +96,14 @@ public abstract class Start {
         }
     }
 
-    private static String interpretKeyStorePath(String arg) throws IOException {
-        // Prüfen, ob Datei existiert
-        File temp = new File(arg);
-        if (!temp.exists()) {
-            log(2, "Zertifikat konnte nicht geladen werden (Datei wurde nicht gefunden)");
-            System.exit(1);
-        }
-
-        // Prüfen, ob Datei den dirketen Pfad enthält
-        if (!temp.getName().equals("last_nginx.conf")) return arg;
-
-        // nginx interpretieren (nur Linux)
-        log(0, "Zertifikat-Argument als nginx Konigurationsdatei erkannt");
-        Scanner scanner = new Scanner(temp);
-        while (scanner.hasNextLine()) {
-            String line = scanner.nextLine();
-            if (line.contains("ssl_certificate")) {
-                line = line.split("/", 2)[1];
-                line = "/" + line.substring(0, line.length() - 1);
-                log(0, "Erkannter Pfad des Zertifikates: " + line);
-                return line;
-            }
-        }
-        log(2, "nginx Datei konnte nicht interpretiert werden. Es wird daher kein Zertifikat verwendet!");
-        return null;
-    }
-
     /**
-     * Loggt einen Text in der Konsole
+     * Loggt einen Text in der Konsole (mit farbigem Prefix)
      *
-     * @param type 0=plain, 1=ok prefix, 2=fehler prefix
+     * @param pType 0=plain, 1=ok prefix, 2=fehler prefix
      */
-    static void log(int type, String message) {
-        String pre = (type == 2 ? "[\033[0;31mFEHLER\033[0m] " : (type == 1 ? "[\033[0;32mOK\033[0m] " : ""));
-        System.out.println(pre + message);
+    static void log(int pType, String pMessage) {
+        String pre = (pType == 2 ? "[\033[0;31mFEHLER\033[0m] " : (pType == 1 ? "[\033[0;32mOK\033[0m] " : ""));
+        System.out.println(pre + pMessage);
     }
 
     /**
@@ -109,9 +119,11 @@ public abstract class Start {
                 if (s.toUpperCase().startsWith("DB=")) dbUrl = s.substring(3);
                 else if (s.toUpperCase().startsWith("MAIL=")) setupMail(s.substring(5));
                 else if (s.toUpperCase().startsWith("RESTPORT=")) restApiPort = Integer.parseInt(s.substring(9));
+                else if (s.toUpperCase().startsWith("WEBSOCKETPORT="))
+                    websocketPort = Integer.parseInt(s.substring(14));
                 else if (s.toUpperCase().startsWith("HOST=")) host = s.substring(5);
                 else if (s.toUpperCase().startsWith("ZERTIFIKAT="))
-                    certificatePath = interpretKeyStorePath(s.substring(11));
+                    certificatePath = interpretCertificatePath(s.substring(11));
             }
         } catch (Exception e) {
             log(2, "Argumente konnten nicht gelesen werden (" + e.getClass().toString() + ": " + e.getMessage() + ")");
@@ -129,10 +141,10 @@ public abstract class Start {
      * Interpretiert einen EMail-Konfigurations-String. Dieser muss folgendes Fotmat haben: {@code
      * HOST:PORT:EMAILADRESSE:PASSWORT}
      *
-     * @param emailString String im oben beschriebene Format
+     * @param pEmailString String im oben beschriebene Format
      */
-    private static void setupMail(String emailString) {
-        String[] emailSplit = emailString.split(":", 4);
+    private static void setupMail(String pEmailString) {
+        String[] emailSplit = pEmailString.split(":", 4);
         Mail.emailHost = emailSplit[0];
         Mail.emailPort = Integer.parseInt(emailSplit[1]);
         Mail.emailAdresse = emailSplit[2];
@@ -143,14 +155,14 @@ public abstract class Start {
      * Wartet darauf, dass eine Verbindung zu der Datenbank hergestellt wird. Diese Methode probiert dabei alle 10
      * Sekunden erneut, die Vebrindung herzustellen.
      *
-     * @param dbUrl Die JDBC-URL für die Datenbank (inkl. Benutzername und Passwort)
+     * @param pDbUrl Die JDBC-URL für die Datenbank (inkl. Benutzername und Passwort)
      * @throws InterruptedException Falls die Methode beim 10 Sekunden warten unterbrochen wird
      */
     @SuppressWarnings("BusyWait")
-    private static void waitForDataBase(String dbUrl) throws InterruptedException {
+    private static void waitForDataBase(String pDbUrl) throws InterruptedException {
         while (true) {
             try {
-                DataBase.connect(dbUrl);
+                DataBase.connect(pDbUrl);
                 log(1, "Die Verbindung zu der Datenbank wurde erfolgreich hergestellt");
                 break;
             } catch (Exception e) {

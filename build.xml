@@ -13,7 +13,8 @@
         <mkdir dir="${docs}"/>
 
         <!-- Generate JavaDoc -->
-        <javadoc destdir="${docs}" windowtitle="${ant.project.name}" access="private">
+        <javadoc destdir="${docs}" windowtitle="${ant.project.name}" access="private" encoding="UTF-8" charset="UTF-8"
+                 docencoding="UTF-8">
             <sourcepath>
                 <pathelement path="src"/>
                 <pathelement path="Uploader/src"/>

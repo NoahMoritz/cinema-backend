@@ -8,12 +8,19 @@
 package de.noamo.cinema.backend.exceptions;
 
 /**
+ * Fehlerklasse für Parameter, die unerwartete Werte enthalten.
+ *
  * @author Noah Hoelterhoff
  * @version 15.09.2020
  * @since 15.09.2020
  */
 public class ParameterException extends Exception {
-    public ParameterException(String message) {
-        super(message);
+    /**
+     * Erstellt eine neue {@link ParameterException} mit konfigurierbarer Fehlermeldung.
+     *
+     * @param pMessage Fehlermeldung (genauen Grund angeben)
+     */
+    public ParameterException(String pMessage) {
+        super(pMessage);
     }
 }

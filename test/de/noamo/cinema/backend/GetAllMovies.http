@@ -1,2 +1,2 @@
 ### Alle Filme abfragen
-GET https://cinema.noamo.de:4567/cinema-backend/get-movies
+GET https://cinema.noamo.de:4567/get-movies
