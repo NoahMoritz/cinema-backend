@@ -13,6 +13,7 @@ import com.google.gson.JsonSyntaxException;
 import de.noamo.cinema.backend.exceptions.InvalidException;
 import de.noamo.cinema.backend.exceptions.ParameterException;
 
+import java.io.File;
 import java.sql.SQLIntegrityConstraintViolationException;
 
 import static spark.Spark.*;
@@ -28,6 +29,63 @@ public class RestServer {
     private final static int FORBIDDEN = 403;
     private final static int SERVER_ERROR = 500;
     private final static Gson gson = new Gson();
+
+    private static void enableCORS() {
+        options("/*", (request, response) -> {
+            String accessControlRequestHeaders = request.headers("Access-Control-Request-Headers");
+            if (accessControlRequestHeaders != null) {
+                response.header("Access-Control-Allow-Headers",
+                        accessControlRequestHeaders);
+            }
+            String accessControlRequestMethod = request.headers("Access-Control-Request-Method");
+            if (accessControlRequestMethod != null) {
+                response.header("Access-Control-Allow-Methods", accessControlRequestMethod);
+            }
+            return "OK";
+        });
+        before((request, response) -> response.header("Access-Control-Allow-Origin", "*"));
+    }
+
+    private static void enableHTTPS() {
+        // Prüfen, ob HTTPS verwendet werden soll
+        if (Start.getCertificatePath() == null) return;
+
+        // Alten PKCS12 KeyStore löschen
+        File oldPkcs12 = new File(System.getProperty("user.home") + File.separator + "cinema.pkcs12");
+        if (oldPkcs12.delete())
+            Start.log(0, "Es wurde eine alter PKCS12 Keystore gefunden. Dieser wird nun geloescht....");
+
+        try {
+            // Zertifikat von PEM zu DER umwandeln
+            Process p1 = Runtime.getRuntime().exec("openssl pkcs12 -export -in " + Start.getCertificatePath() + " -out "
+                    + System.getProperty("user.home") + File.separator + "cinema.pkcs12 -passout pass:temppw -name " + Start.getHost());
+            int exitVal1 = p1.waitFor();
+            if (exitVal1 != 0) throw new Exception("Error PEM to PKCS12");
+
+            // Alten Key aus dem Keystore ggf. löschen
+            Process p2 = Runtime.getRuntime().exec("keytool -delete -noprompt -alias " + Start.getHost() + " -keystore " +
+                    System.getProperty("user.home") + File.separator + "cinema.jks -storepass temppw");
+            p2.waitFor();
+
+            // Zertifikat zum Keystore hinzufügen
+            Process p3 = Runtime.getRuntime().exec("keytool -v -importkeystore -alias " + Start.getHost() +
+                    " -srckeystore " + System.getProperty("user.home") + File.separator + "cinema.pkcs12 -keystore " +
+                    System.getProperty("user.home") + File.separator + "cinema.jks -noprompt -storepass temppw " +
+                    "-srcstorepass temppw -deststoretype JKS");
+            int exitVal3 = p3.waitFor();
+            if (exitVal3 != 0) throw new Exception("Error PKCS23 to JKS");
+        } catch (Exception e) {
+            Start.log(2, "HTTPS konnte fuer den REST-Server nicht aktiviert werden (" + e.getMessage() + ")");
+            return;
+        } finally {
+            //noinspection ResultOfMethodCallIgnored
+            new File(System.getProperty("user.home") + File.separator + "cinema.pkcs12").delete();
+        }
+
+        // HTTPS aktivieren
+        secure(System.getProperty("user.home") + File.separator + "cinema.jks", "temppw", null, null);
+        Start.log(1, "HTTPS wurde fuer die REST API erfolgreich aktiviert");
+    }
 
     /**
      * Regelt GET-Anfragen für die Aktivierungsseite.
@@ -45,22 +103,6 @@ public class RestServer {
                 return Resources.getActivationSite("UNGÜLTIG", "Der Aktivierungslink ist ungültig oder wurde bereits verwendet");
             }
         }));
-    }
-
-    private static void enableCORS() {
-        options("/*", (request, response) -> {
-            String accessControlRequestHeaders = request.headers("Access-Control-Request-Headers");
-            if (accessControlRequestHeaders != null) {
-                response.header("Access-Control-Allow-Headers",
-                        accessControlRequestHeaders);
-            }
-            String accessControlRequestMethod = request.headers("Access-Control-Request-Method");
-            if (accessControlRequestMethod != null) {
-                response.header("Access-Control-Allow-Methods", accessControlRequestMethod);
-            }
-            return "OK";
-        });
-        before((request, response) -> response.header("Access-Control-Allow-Origin", "*"));
     }
 
     /**
@@ -103,6 +145,7 @@ public class RestServer {
      */
     public static void start(int port) {
         port(port);
+        enableHTTPS();
         enableCORS();
         setupCreateAccount();
         setupActivate();

@@ -7,29 +7,41 @@
 
 package de.noamo.cinema.backend;
 
+import java.io.File;
+import java.io.IOException;
+import java.util.Scanner;
+
 /**
  * Einstieg in das Programm. Hier werden alle Dienste (die zu dem Backend gehören) gestartet.
  *
  * @author Noah Hoelterhoff
- * @version 16.09.2020
+ * @version 21.09.2020
  * @since 05.09.2020
  */
 public abstract class Start {
     private final static int WEBSOCKET_PORT = 56953;
-    private static String host = "noamo.de";
+    private static String certificatePath;
+    private static String host;
     private static int restApiPort = 4567;
+
+    /**
+     * Fragt den KeyStorePath ab. Dieser gibt an, wo die Schlüssel für die Zertifikate der Domain liegen.
+     */
+    static String getCertificatePath() {
+        return certificatePath;
+    }
 
     /**
      * Fragt den Host ab, auf dem der Server läuft.
      */
-    public static String getHost() {
+    static String getHost() {
         return host;
     }
 
     /**
      * Fragt den Port ab, auf der die REST API arbeitet.
      */
-    public static int getRestApiPort() {
+    static int getRestApiPort() {
         return restApiPort;
     }
 
@@ -45,6 +57,33 @@ public abstract class Start {
             log(0, "Das Programm wird nun beendet...");
             System.exit(1);
         }
+    }
+
+    private static String interpretKeyStorePath(String arg) throws IOException {
+        // Prüfen, ob Datei existiert
+        File temp = new File(arg);
+        if (!temp.exists()) {
+            log(2, "Zertifikat konnte nicht geladen werden (Datei wurde nicht gefunden)");
+            System.exit(1);
+        }
+
+        // Prüfen, ob Datei den dirketen Pfad enthält
+        if (!temp.getName().equals("last_nginx.conf")) return arg;
+
+        // nginx interpretieren (nur Linux)
+        log(0, "Zertifikat-Argument als nginx Konigurationsdatei erkannt");
+        Scanner scanner = new Scanner(temp);
+        while (scanner.hasNextLine()) {
+            String line = scanner.nextLine();
+            if (line.contains("ssl_certificate")) {
+                line = line.split("/", 2)[1];
+                line = "/" + line.substring(0, line.length() - 1);
+                log(0, "Erkannter Pfad des Zertifikates: " + line);
+                return line;
+            }
+        }
+        log(2, "nginx Datei konnte nicht interpretiert werden. Es wird daher kein Zertifikat verwendet!");
+        return null;
     }
 
     /**
@@ -68,9 +107,11 @@ public abstract class Start {
         try {
             for (String s : args) {
                 if (s.toUpperCase().startsWith("DB=")) dbUrl = s.substring(3);
-                if (s.toUpperCase().startsWith("MAIL=")) setupMail(s.substring(5));
-                if (s.toUpperCase().startsWith("RESTPORT=")) restApiPort = Integer.parseInt(s.substring(9));
-                if (s.toUpperCase().startsWith("HOST=")) host = s.substring(5);
+                else if (s.toUpperCase().startsWith("MAIL=")) setupMail(s.substring(5));
+                else if (s.toUpperCase().startsWith("RESTPORT=")) restApiPort = Integer.parseInt(s.substring(9));
+                else if (s.toUpperCase().startsWith("HOST=")) host = s.substring(5);
+                else if (s.toUpperCase().startsWith("ZERTIFIKAT="))
+                    certificatePath = interpretKeyStorePath(s.substring(11));
             }
         } catch (Exception e) {
             log(2, "Argumente konnten nicht gelesen werden (" + e.getClass().toString() + ": " + e.getMessage() + ")");

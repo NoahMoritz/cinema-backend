@@ -8,9 +8,8 @@
 package de.noamo.util;
 
 import net.schmizz.sshj.SSHClient;
-import net.schmizz.sshj.connection.ConnectionException;
+import net.schmizz.sshj.connection.channel.direct.Session;
 import net.schmizz.sshj.sftp.SFTPClient;
-import net.schmizz.sshj.transport.TransportException;
 import net.schmizz.sshj.transport.verification.PromiscuousVerifier;
 import net.schmizz.sshj.xfer.FileSystemFile;
 
@@ -30,8 +29,8 @@ public abstract class Uploader {
     private static String hostname, username, password, pathExternal, pathLocal, serviceName;
     private static SSHClient ssh;
 
-    private static void chnageService(String function) throws ConnectionException, TransportException {
-        ssh.startSession().exec("sudo systemctl " + function + " " + serviceName);
+    private static void changeServiceStatus(String function) throws IOException {
+        Session.Command cmd = ssh.startSession().exec("systemctl " + function + " " + serviceName);
         System.out.println("Service: " + function);
     }
 
@@ -81,10 +80,10 @@ public abstract class Uploader {
         // execute
         try {
             connect();
-            chnageService("stop");
+            changeServiceStatus("stop");
             upload();
         } finally {
-            chnageService("start");
+            changeServiceStatus("start");
         }
     }
 
@@ -94,6 +93,5 @@ public abstract class Uploader {
         sftp.put(new FileSystemFile(pathLocal), (pathExternal.endsWith("/") ? pathExternal +
                 new File(pathLocal).getName() : pathExternal + "/" + new File(pathLocal).getName()));
         System.out.println("Upload finished");
-        sftp.close();
     }
 }

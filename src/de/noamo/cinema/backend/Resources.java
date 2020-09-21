@@ -34,7 +34,7 @@ public class Resources {
      */
     private static String loadResourceIntoString(String fileName) throws Exception {
         StringBuilder stringBuilder = new StringBuilder();
-        try (Scanner scanner = new Scanner(Mail.class.getResourceAsStream(fileName))) {
+        try (Scanner scanner = new Scanner(Resources.class.getResourceAsStream(fileName))) {
             while (scanner.hasNextLine()) {
                 stringBuilder.append(scanner.nextLine()).append(System.lineSeparator());
             }
