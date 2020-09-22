@@ -17,6 +17,7 @@ import org.apache.commons.dbcp2.BasicDataSource;
 import java.sql.*;
 import java.text.Normalizer;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 /**
  * Ist zuständig für die Verbindung zur Datenbank und für Aktionen, die dort ausgeführt werden. Die Verbindungen werden
@@ -198,7 +199,7 @@ abstract class DataBase {
                 temp.addProperty("name", resultSet.getString("name"));
                 temp.addProperty("bild_link", resultSet.getString("bild_link"));
                 temp.addProperty("hintergrund_bild_link", resultSet.getString("hintergrund_bild_link"));
-                temp.addProperty("trailer_youtube", resultSet.getString("trailer_youtube"));
+                temp.addProperty("trailer_youtube_id", resultSet.getString("trailer_youtube"));
                 temp.addProperty("kurze_beschreibung", resultSet.getString("kurze_beschreibung"));
                 temp.addProperty("beschreibung", resultSet.getString("beschreibung"));
                 temp.addProperty("fsk", resultSet.getInt("fsk"));
@@ -215,6 +216,19 @@ abstract class DataBase {
             Start.log(2, "Die Filmliste konnte nicht abgefragt werden! (" + e.getMessage() + ")");
         }
         return movies.json;
+    }
+
+    /**
+     * Analysiert den Link aus einem YouTube-Video und findend die Video-Id heraus
+     *
+     * @param pLink Link zu dem YouTube Video (entweder youtu.be, ein link mit watch?v=, oder die ID)
+     * @return Die Video ID
+     */
+    private static String youtubeLinkToVideoId(String pLink) {
+        if (pLink.length() == 11) return pLink;
+        else if (pLink.contains("youtu.be")) return pLink.split("/", 4)[3];
+        else if (pLink.contains("watch?v=")) return pLink.split(Pattern.quote("watch?v="), 2)[1].substring(0, 11);
+        else return "-";
     }
 
     /**

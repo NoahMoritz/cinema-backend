@@ -1,5 +1,5 @@
 # Capitol Cinema Backend
-Folgende Argumente können/müssen dem Backend übergeben werden:
+<b><u>Folgende Argumente können/müssen dem Backend übergeben werden:</u></b>
 
 - <b>DB</b>
     - Verpflichtend: Ja
@@ -28,3 +28,70 @@ Folgende Argumente können/müssen dem Backend übergeben werden:
     - Standartwert: 56953
     - Aufbau: WEBSOCKETPORT=(WEBSOCKET PORT)
     - Beispiel: WEBSOCKETPORT=4569
+
+<br><br>
+<b><u>Folgende Routen hat die REST API:</u></b>
+
+- <b>/get-movies</b>
+    - GET
+    - Fragt alle Filme ab
+    - Rückgabe z.B.:
+        ```json
+        {
+          "erstellt": 1600787832012,
+          "filme": [{
+            "filmid": 7,
+            "name": "Hello Again – Ein Tag für immer",
+            "bild_link": "https://download.noamo.de/images/cinema/hello_again.jpg",
+            "hintergrund_bild_link": "https://download.noamo.de/images/cinema/bg_hello_again.jpg",
+            "trailer_youtube_id": "G7nEpa04oDc",
+            "kurze_beschreibung": "Romantische Komödie, die \"Und täglich grüßt das Murmeltier\" mit \"Die Hochzeit meines besten Freundes\" kreuzt.",
+            "beschreibung": "Zazie (Alicia von Rittberg) lebt gemeinsam mit ihren Freunden [für dieses Beispiel gekürzt]",
+            "fsk": 6,
+            "dauer": 92,
+            "land": "Deutschland",
+            "filmstart": "2020-09-24",
+            "empfohlen": false
+          },
+          {
+            "filmid": 1,
+            "name": "The Outpost - Überleben ist Alles",
+            "bild_link": "https://download.noamo.de/images/cinema/the_outpost.jpg",
+            "hintergrund_bild_link": "https://download.noamo.de/images/cinema/bg_the_outpost.jpg",
+            "trailer_youtube_id": "_9Lkxfx-Rxs",
+            "kurze_beschreibung": "Auf einer wahren Begebenheit basierender Kriegs-Actioner mit Starbesetzung",
+            "beschreibung": "Camp Keating ist ein Außenposten des US-Militärs, [für dieses Beispiel gekürzt]",
+            "fsk": 12,
+            "dauer": 123,
+            "land": "USA",
+            "filmstart": "2020-09-17",
+            "empfohlen": true
+          }]
+        }
+        ```
+        <br>
+- <b>/create-account</b>
+    - POST
+    - Erstellt ein neues Konto und versendet eine Aktivierungsmail
+    - Fehlercodes:
+        - 400 (Bad Request): Fehlerhafte Anfrage
+        - 403 (Forbidden): Account mit diesen Parametern nicht erlaubt (Erklärung in der Antwort)
+        - 409 (Conflict): EMail-Adresse existiert bereits
+        - 500 (Server Error): Interner Serverfehler
+    - Eingabe z.B.:
+        ```json
+        {
+          "name": "Max Mustermann",
+          "email": "max.mustermann@gmail.com",
+          "passwort": "testpassword"
+        }
+        ```
+        <br>
+- <b>/activate/:key</b>
+    - GET
+    - Aktiviert ein Konto
+    - Die Rückgabe ist immer eine anzeigbare HTML Seite
+    - Fehlercodes:
+        - 400 (Bad Request): Fehlerhafte Anfrage
+        - 403 (Forbidden): Der Account wird bereits verwendet
+ 
