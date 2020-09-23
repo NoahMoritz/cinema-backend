@@ -63,42 +63,59 @@ abstract class RestServer {
         // Prüfen, ob HTTPS verwendet werden soll
         if (Start.getCertificatePath() == null) return;
 
-        // ggf. alten PKCS12 KeyStore löschen
-        File oldPkcs12 = new File(System.getProperty("user.home") + File.separator + "cinema.pkcs12");
-        if (oldPkcs12.delete())
-            Start.log(0, "Es wurde eine alter PKCS12 Keystore gefunden. Dieser wird nun geloescht....");
+        // Path vorbereiten
+        String home = System.getProperty("user.home") + File.separator + "cinema" + File.separator;
+
+        // ggf. alten PKCS12 und JKS KeyStore löschen
+        File oldPkcs12 = new File(home + "cinema.pkcs12");
+        File oldJks = new File(home + "cinema.jks");
+        if (oldPkcs12.delete()) Start.log(0, "Es wurde eine alter PKCS12 Keystore gefunden & geloescht");
+        if (oldJks.delete()) Start.log(0, "Es wurde eine alter JKS Keystore gefunden & geloescht");
 
         // Zertifikat zu JKS-Keystore hinzufügen
         try {
+            /*// Das erste Zertifikat aus der PEM Datei extrahieren
+            String pem = Util.loadFileIntoString(new File(Start.getCertificatePath()));
+            int indexStartPrivateKey = pem.indexOf("-----BEGIN PRIVATE KEY-----");
+            int indexEndePrivateKey = pem.indexOf("-----END PRIVATE KEY-----") + 24;
+            int indexStartCertificate = pem.indexOf("-----BEGIN CERTIFICATE-----");
+            int indexEndeCertificate = pem.indexOf("-----END CERTIFICATE-----") + 24;
+            String cutPem = pem.substring(indexStartPrivateKey, indexEndePrivateKey + 1) + System.lineSeparator() +
+                    System.lineSeparator() + pem.substring(indexStartCertificate, indexEndeCertificate + 1);
+            Util.saveStringToFile(new File(home + "cinema.pem"), cutPem);*/
+
             // PEM-Zertifikat in einen PKCS12-Keystore speichern
-            Process p1 = Runtime.getRuntime().exec("openssl pkcs12 -export -in " + Start.getCertificatePath() + " -out "
-                    + System.getProperty("user.home") + File.separator + "cinema.pkcs12 -passout pass:temppw -name " + Start.getHost());
+            Process p1 = Runtime.getRuntime().exec("openssl pkcs12 " +
+                    "-export " +
+                    "-in " + Start.getCertificatePath() + " " +
+                    "-out " + home + "cinema.pkcs12 " +
+                    "-passout pass:temppw " +
+                    "-name " + Start.getHost());
             int exitVal1 = p1.waitFor();
             if (exitVal1 != 0) throw new Exception("Error PEM to PKCS12");
 
-            // ggf. alten Key aus dem JKS-Keystore löschen
-            Process p2 = Runtime.getRuntime().exec("keytool -delete -noprompt -alias " + Start.getHost() + " -keystore " +
-                    System.getProperty("user.home") + File.separator + "cinema.jks -storepass temppw");
-            p2.waitFor();
-
             // Zertifikat aus PKCS12-Keystore zum JKS-Keystore hinzufügen
-            Process p3 = Runtime.getRuntime().exec("keytool -v -importkeystore -alias " + Start.getHost() +
-                    " -srckeystore " + System.getProperty("user.home") + File.separator + "cinema.pkcs12 -keystore " +
-                    System.getProperty("user.home") + File.separator + "cinema.jks -noprompt -storepass temppw " +
-                    "-srcstorepass temppw -deststoretype JKS");
+            Process p3 = Runtime.getRuntime().exec("keytool -v " +
+                    "-importkeystore " +
+                    "-srckeystore " + home + "cinema.pkcs12 " +
+                    "-keystore " + home + "cinema.jks " +
+                    "-noprompt " +
+                    "-storepass temppw " +
+                    "-srcstorepass temppw " +
+                    "-deststoretype JKS " +
+                    "-srcalias " + Start.getHost() + " " +
+                    "-destalias " + Start.getHost());
             int exitVal3 = p3.waitFor();
-            if (exitVal3 != 0) throw new Exception("Error PKCS23 to JKS");
+            //if (exitVal3 != 0) throw new Exception("Error PKCS23 to JKS");
+
+            // HTTPS aktivieren
+            secure(home + "cinema.jks", "temppw", Start.getHost(), null, null);
+            Start.log(1, "HTTPS wurde fuer die REST API erfolgreich aktiviert");
         } catch (Exception e) {
             Start.log(2, "HTTPS konnte fuer die REST API nicht aktiviert werden (" + e.getMessage() + ")");
-            return;
         } finally {
-            //noinspection ResultOfMethodCallIgnored
-            new File(System.getProperty("user.home") + File.separator + "cinema.pkcs12").delete();
-        }
 
-        // HTTPS aktivieren
-        secure(System.getProperty("user.home") + File.separator + "cinema.jks", "temppw", null, null);
-        Start.log(1, "HTTPS wurde fuer die REST API erfolgreich aktiviert");
+        }
     }
 
     /**
@@ -165,6 +182,7 @@ abstract class RestServer {
      * @param pPort Der Port, auf dem der Server gestartet werden soll
      */
     public static void start(int pPort) {
+        initExceptionHandler((e) -> Start.log(2, e.getMessage()));
         port(pPort);
         enableHTTPS();
         enableCORS();

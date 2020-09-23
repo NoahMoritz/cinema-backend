@@ -1,2 +1,2 @@
 ### Alle Filme abfragen
-GET https://cinema.noamo.de:4567/get-movies
+GET https://dhbw-kino.de:4567/get-movies
