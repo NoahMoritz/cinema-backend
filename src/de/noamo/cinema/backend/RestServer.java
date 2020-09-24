@@ -118,8 +118,8 @@ abstract class RestServer {
         // Port einstellen
         port(pPort);
         // HTTPS aktivieren
-        secure(System.getProperty("user.home") + File.separator + "cinema" + File.separator + "cinema.jks",
-                "temppw", Start.getHost(), null, null);
+        if (Start.getCertificatePath() != null) secure(System.getProperty("user.home") + File.separator + "cinema" +
+                File.separator + "cinema.jks", "temppw", Start.getHost(), null, null);
         // Cross-Origin Resource Sharing aktivieren
         enableCORS();
         // Pfade einstellen
