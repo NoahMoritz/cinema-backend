@@ -1,0 +1,3 @@
+# Probiert einen Account zu aktivieren (falscher Schlüssel)
+POST https://dhbw-kino.de:4567/activate/
+Content-Type: : application/json

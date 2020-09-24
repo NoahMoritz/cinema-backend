@@ -11,10 +11,13 @@ import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.util.Scanner;
+import java.util.regex.Pattern;
 
 /**
+ * Klasse für verschiedene Hilfsmethoden
+ *
  * @author Noah Holeterhoff
- * @version 31.07.2020
+ * @version 24.09.2020
  * @since 15.04.2020
  */
 public class Util {
@@ -53,4 +56,18 @@ public class Util {
             fileWriter.write(content);
         }
     }
+
+    /**
+     * Analysiert den Link aus einem YouTube-Video und findend die Video-Id heraus
+     *
+     * @param pLink Link zu dem YouTube Video (entweder youtu.be, ein link mit watch?v=, oder die ID)
+     * @return Die Video ID
+     */
+    private static String youtubeLinkToVideoId(String pLink) {
+        if (pLink.length() == 11) return pLink;
+        else if (pLink.contains("youtu.be")) return pLink.split("/", 4)[3];
+        else if (pLink.contains("watch?v=")) return pLink.split(Pattern.quote("watch?v="), 2)[1].substring(0, 11);
+        else return "-";
+    }
 }
+

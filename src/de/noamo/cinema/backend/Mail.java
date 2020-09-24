@@ -37,7 +37,7 @@ abstract class Mail {
         String htmlText = Resources.getActivationMail((Start.getCertificatePath() == null ? "http://" : "https://")
                 + Start.getHost() + ":" + Start.getRestApiPort() + "/activate/" + pAktivierungsSchluessel);
 
-        sendMail(pName, pEmail, "Capitol Cinema - Aktivierungscode", htmlText);
+        sendMail(pName, pEmail, "DHBW Kino - Aktivierungscode", htmlText);
     }
 
     /**
@@ -52,7 +52,7 @@ abstract class Mail {
         new Thread(() -> {
             // Email vorbereiten
             Email mail = EmailBuilder.startingBlank().to(pName, pEmail).withSubject(pSubject).
-                    withHTMLText(pHtmlText).from("Capitol Cinema", emailAdresse).buildEmail();
+                    withHTMLText(pHtmlText).from("DHBW Kino", emailAdresse).buildEmail();
 
             // Mailer vorbereiten
             Mailer mailer = MailerBuilder.withSMTPServer(emailHost, emailPort, emailAdresse, emailPasswort).

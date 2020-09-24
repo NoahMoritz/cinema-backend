@@ -17,7 +17,6 @@ import org.apache.commons.dbcp2.BasicDataSource;
 import java.sql.*;
 import java.text.Normalizer;
 import java.util.UUID;
-import java.util.regex.Pattern;
 
 /**
  * Ist zuständig für die Verbindung zur Datenbank und für Aktionen, die dort ausgeführt werden. Die Verbindungen werden
@@ -125,30 +124,30 @@ abstract class DataBase {
      */
     private static void dataBaseSetup(Connection pConnection) throws SQLException {
         pConnection.prepareStatement("CREATE TABLE IF NOT EXISTS konten(" +
-                "benutzerid INT NOT NULL AUTO_INCREMENT, " + // Eindeutige ID des Benutzers
-                "rolle INT NOT NULL DEFAULT 0, " + // Rolle des Nutzers (spielt für den Zugriff eine Rolle)
+                "benutzerid INT UNSIGNED NOT NULL AUTO_INCREMENT, " + // Eindeutige ID des Benutzers
+                "rolle INT(3) UNSIGNED NOT NULL DEFAULT 0, " + // Rolle des Nutzers (spielt für den Zugriff eine Rolle)
                 "aktiv BIT NOT NULL DEFAULT 0," + // Ob das Konto aktiviert wurde
                 "erstellt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, " + // Erstellungszeitpunkt des Accounts
                 "passwort VARCHAR(50) NOT NULL, " + // Das Passwort (für die Anmeldung)
                 "email VARCHAR(254) NOT NULL, " + // Eine Email-Adresse des Benutzers (für Infos über Probleme)
-                "name VARCHAR(100) NOT NULL, " + // Der Name der Person
+                "name VARCHAR(60) NOT NULL, " + // Der Name der Person
                 "PRIMARY KEY (benutzerid), " + // Eindeutige ID des Benutzers als Key
                 "UNIQUE (email));").executeUpdate();
 
-        pConnection.prepareStatement("CREATE TABLE IF NOT EXISTS aktivierungsSchluessel(benutzerid INT NOT NULL, " + // Eindeutige ID des Benutzers
+        pConnection.prepareStatement("CREATE TABLE IF NOT EXISTS aktivierungsSchluessel(benutzerid INT UNSIGNED NOT NULL, " + // Eindeutige ID des Benutzers
                 "aktivierungs_schluessel VARCHAR(36) NOT NULL, " +
                 "erstellt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, " + // Aktivierungsschlüssel für das Konto
                 "UNIQUE (aktivierungs_schluessel), " + // Ein Aktivierungsschlüssel muss eindeutig sein
                 "FOREIGN KEY (benutzerid) REFERENCES konten(benutzerid))").executeUpdate();
 
         pConnection.prepareStatement("CREATE TABLE IF NOT EXISTS adressen(" +
-                "benutzerid INT NOT NULL, " + // Eindeutige ID des Benutzers, zu dem dise Adresse gehört
+                "benutzerid INT UNSIGNED NOT NULL, " + // Eindeutige ID des Benutzers, zu dem dise Adresse gehört
                 "erstellt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, " + // Zeitpunkt des Hinzufügens der Adresse
                 "anrede VARCHAR(30) NOT NULL, " + // Anrede ("Herr"/"Frau" + ggf. "Dr." oder "Prof.) der Person an der Rechnungsadresse
                 "vorname VARCHAR(50) NOT NULL, " + // Der Vorname der Person an der Rechnungsadresse
                 "nachname VARCHAR(50) NOT NULL, " + // Der Nachname der Person an der Rechnungsadresse
                 "strasse VARCHAR(100) NOT NULL, " + // Straße inkl. Hausnummer
-                "plz VARCHAR(5) NOT NULL, " + // PLZ der Adresse
+                "plz INT(5) NOT NULL, " + // PLZ der Adresse
                 "telefon VARCHAR(20), " + // Telefonnummer der Rechnungsadresse
                 "FOREIGN KEY (benutzerid) REFERENCES konten(benutzerid));").executeUpdate();
 
@@ -216,19 +215,6 @@ abstract class DataBase {
             Start.log(2, "Die Filmliste konnte nicht abgefragt werden! (" + e.getMessage() + ")");
         }
         return movies.json;
-    }
-
-    /**
-     * Analysiert den Link aus einem YouTube-Video und findend die Video-Id heraus
-     *
-     * @param pLink Link zu dem YouTube Video (entweder youtu.be, ein link mit watch?v=, oder die ID)
-     * @return Die Video ID
-     */
-    private static String youtubeLinkToVideoId(String pLink) {
-        if (pLink.length() == 11) return pLink;
-        else if (pLink.contains("youtu.be")) return pLink.split("/", 4)[3];
-        else if (pLink.contains("watch?v=")) return pLink.split(Pattern.quote("watch?v="), 2)[1].substring(0, 11);
-        else return "-";
     }
 
     /**
