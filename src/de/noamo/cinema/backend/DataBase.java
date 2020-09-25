@@ -8,9 +8,11 @@
 package de.noamo.cinema.backend;
 
 import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import de.noamo.cinema.backend.exceptions.InvalidException;
 import de.noamo.cinema.backend.exceptions.ParameterException;
+import de.noamo.cinema.backend.exceptions.UnauthorisedException;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.dbcp2.BasicDataSource;
 
@@ -55,6 +57,35 @@ abstract class DataBase {
                      "aktivierungs_schluessel='" + pAktivierungsSchluessel + "';")) {
             if (preparedStatement1.executeUpdate() == 0) throw new InvalidException("Ungültiger Aktivierungscode!");
             else preparedStatement2.executeUpdate();
+        }
+    }
+
+    /**
+     * Prüft, ob ein Account autorisiert ist, eine bestimmte Aktion auszuführen
+     *
+     * @param pJson  {@link JsonObject}, dass die Propertys {@code email} und {@code passwort} enthält
+     * @param pLevel Das Level, dass für diese Aktion mindestens benötigt wird
+     * @throws SQLException          Falls ein Problem in der Verbindung zu der Datenbank vorliegt
+     * @throws ParameterException    Falls die Attribute {@code email} und {@code passwort} nicht existieren
+     * @throws UnauthorisedException Falls der Nutzer für diese Aktion nicht autorisiert ist
+     */
+    private static void authorize(JsonObject pJson, int pLevel) throws SQLException, ParameterException, UnauthorisedException {
+        // Parameter auslesen
+        if (!pJson.has("email") || !pJson.has("passwort")) throw
+                new ParameterException("Es fehlen die Popertys 'email' und/oder 'passwort'");
+        String email = pJson.get("email").getAsString();
+        String passwort = pJson.get("passwort").getAsString();
+
+        // Abfrage starten
+        try (Connection connection = basicDataSource.getConnection();
+             PreparedStatement preparedStatement = connection.prepareStatement("SELECT rolle FROM konten WHERE email='" +
+                     email + "' AND passwort='" + DigestUtils.md5Hex(passwort) + "';");
+             ResultSet rs = preparedStatement.executeQuery()) {
+            if (rs.next()) {
+                if (rs.getInt("rolle") < pLevel)
+                    throw new UnauthorisedException("Keine ausreichenden Rechte! Benoetigt wird Stufe " +
+                            pLevel + ". Sie haben: " + rs.getInt("rolle"));
+            } else throw new UnauthorisedException("Account mit diesen Anmeldedaten nicht gefunden");
         }
     }
 
@@ -166,6 +197,38 @@ abstract class DataBase {
                 "empfohlen BIT NOT NULL DEFAULT 0, " +
                 "PRIMARY KEY (filmid));").executeUpdate();
 
+        pConnection.prepareStatement("CREATE TABLE IF NOT EXISTS kinosaele(" +
+                "saalid INT UNSIGNED NOT NULL AUTO_INCREMENT, " +
+                "name VARCHAR(20) NOT NULL, " +
+                "width INT NOT NULL, " +
+                "height INT NOT NULL, " +
+                "PRIMARY KEY (saalid)," +
+                "UNIQUE (name)" +
+                ");").executeUpdate();
+
+        pConnection.prepareStatement("CREATE TABLE IF NOT EXISTS kategorien(" +
+                "kategorieid INT UNSIGNED NOT NULL AUTO_INCREMENT, " +
+                "name VARCHAR(20) NOT NULL, " +
+                "aufpreis DECIMAL(4,2) NOT NULL, " +
+                "faktor DOUBLE UNSIGNED NOT NULL, " +
+                "width INT UNSIGNED NOT NULL, " +
+                "height INT UNSIGNED NOT NULL ," +
+                "color_hex VARCHAR(6) NOT NULL," +
+                "PRIMARY KEY (kategorieid)," +
+                "UNIQUE (name)" +
+                ");").executeUpdate();
+
+        pConnection.prepareStatement("CREATE TABLE IF NOT EXISTS saalPlaetze(" +
+                "saalid INT UNSIGNED NOT NULL, " +
+                "kategorieid INT UNSIGNED NOT NULL," +
+                "reihe VARCHAR(1) NOT NULL, " +
+                "platz INT(2) NOT NULL, " +
+                "x INT UNSIGNED NOT NULL, " +
+                "y INT UNSIGNED NOT NULL, " +
+                "UNIQUE (saalid,reihe,platz), " +
+                "FOREIGN KEY (saalid) REFERENCES kinosaele(saalid), " +
+                "FOREIGN KEY (kategorieid) REFERENCES kategorien(kategorieid)" +
+                ");").executeUpdate();
         try (PreparedStatement ps_adminAccount = pConnection.prepareStatement("INSERT INTO konten(passwort, name, " +
                 "email, rolle, aktiv) VALUES ('" + DigestUtils.md5Hex("Initial") + "', 'Admin', 'info@noamo.de', 999, 1);")) {
             ps_adminAccount.executeUpdate();
@@ -215,6 +278,91 @@ abstract class DataBase {
             Start.log(2, "Die Filmliste konnte nicht abgefragt werden! (" + e.getMessage() + ")");
         }
         return movies.json;
+    }
+
+    static JsonArray getKateogorien() throws SQLException {
+        try (Connection connection = basicDataSource.getConnection();
+             PreparedStatement preparedStatement = connection.prepareStatement("SELECT * FROM kategorien");
+             ResultSet rs = preparedStatement.executeQuery()) {
+            JsonArray kategorien = new JsonArray();
+            while (rs.next()) {
+                JsonObject temp = new JsonObject();
+                temp.addProperty("kategorieid", rs.getInt("kategorieid"));
+                temp.addProperty("name", rs.getString("name"));
+                temp.addProperty("aufpreis", rs.getDouble("aufpreis"));
+                temp.addProperty("faktor", rs.getDouble("faktor"));
+                temp.addProperty("width", rs.getInt("width"));
+                temp.addProperty("height", rs.getInt("height"));
+                temp.addProperty("color_hex", '#' + rs.getString("color_hex"));
+                kategorien.add(temp);
+            }
+            return kategorien;
+        }
+    }
+
+    static JsonObject getSaalPlan(int saalid) throws SQLException, InvalidException {
+        try (Connection connection = basicDataSource.getConnection();
+             PreparedStatement preparedStatement1 = connection.prepareStatement("SELECT * FROM kinosaele WHERE saalid=" + saalid + ";");
+             PreparedStatement preparedStatement2 = connection.prepareStatement("SELECT * FROM saalPlaetze WHERE saalid=" + saalid + ";");
+             ResultSet r1 = preparedStatement1.executeQuery();
+             ResultSet r2 = preparedStatement2.executeQuery()) {
+            JsonObject saal = new JsonObject();
+
+            if (!r1.next()) throw new InvalidException("Unbekannter Saal");
+            saal.addProperty("name", r1.getString("name"));
+            saal.addProperty("width", r1.getInt("width"));
+            saal.addProperty("height", r1.getInt("height"));
+
+            JsonArray sitze = new JsonArray();
+            saal.add("sitze", sitze);
+
+            while (r2.next()) {
+                JsonObject temp = new JsonObject();
+                temp.addProperty("kategorie", r2.getInt("kategorieid"));
+                temp.addProperty("reihe", r2.getString("reihe"));
+                temp.addProperty("platz", r2.getInt("platz"));
+                temp.addProperty("x", r2.getInt("x"));
+                temp.addProperty("y", r2.getInt("y"));
+                sitze.add(temp);
+            }
+
+            return saal;
+        }
+    }
+
+    static void uploadSaalplan(JsonObject jsonObject) throws SQLException, ParameterException, UnauthorisedException {
+        authorize(jsonObject, 700);
+
+        String name = jsonObject.get("name").getAsString();
+        int width = jsonObject.get("width").getAsInt();
+        int height = jsonObject.get("height").getAsInt();
+        JsonArray sitze = jsonObject.get("sitze").getAsJsonArray();
+
+        try (Connection connection = basicDataSource.getConnection();
+             PreparedStatement preparedStatement1 = connection.prepareStatement("INSERT INTO kinosaele(name, " +
+                     "width, height) VALUES ('" + name + "', " + width + ", " + height + ")", Statement.RETURN_GENERATED_KEYS)) {
+            preparedStatement1.executeUpdate();
+
+            // Automatisch generierte ID abfragen
+            ResultSet rs = preparedStatement1.getGeneratedKeys();
+            rs.next();
+            int saalid = rs.getInt(1);
+
+            // Jeden Sitz hochladen
+            PreparedStatement preparedStatement2 = connection.prepareStatement("INSERT INTO saalPlaetze(saalid, " +
+                    "kategorieid, reihe, platz, x, y) VALUES (?, ?, ?, ?, ?, ?)");
+            for (JsonElement s : sitze) {
+                JsonObject temp = s.getAsJsonObject();
+                preparedStatement2.setInt(1, saalid);
+                preparedStatement2.setInt(2, temp.get("kategorie").getAsInt());
+                preparedStatement2.setString(3, temp.get("reihe").getAsString());
+                preparedStatement2.setInt(4, temp.get("platz").getAsInt());
+                preparedStatement2.setInt(5, temp.get("x").getAsInt());
+                preparedStatement2.setInt(6, temp.get("y").getAsInt());
+                preparedStatement2.addBatch();
+            }
+            preparedStatement2.executeBatch();
+        }
     }
 
     /**

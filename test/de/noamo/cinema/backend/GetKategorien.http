@@ -1,0 +1,2 @@
+### Alle Kategorien abfragen
+GET https://dhbw-kino.de:4567/get-kategorien

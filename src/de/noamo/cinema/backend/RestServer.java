@@ -12,8 +12,10 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonSyntaxException;
 import de.noamo.cinema.backend.exceptions.InvalidException;
 import de.noamo.cinema.backend.exceptions.ParameterException;
+import de.noamo.cinema.backend.exceptions.UnauthorisedException;
 
 import java.io.File;
+import java.sql.SQLException;
 import java.sql.SQLIntegrityConstraintViolationException;
 
 import static spark.Spark.*;
@@ -29,6 +31,7 @@ abstract class RestServer {
     private final static int BAD_REQUEST = 400;
     private final static int CONFLICT = 409;
     private final static int FORBIDDEN = 403;
+    private final static int NOT_FOUND = 404;
     private final static int SERVER_ERROR = 500;
     private final static Gson gson = new Gson();
 
@@ -97,6 +100,18 @@ abstract class RestServer {
         }));
     }
 
+    private static void setupGetKategorien() {
+        get("/get-kategorien", (request, response) -> {
+            try {
+                response.type("text/json; charset=utf-8");
+                return DataBase.getKateogorien().toString();
+            } catch (SQLException sqlException) {
+                response.status(SERVER_ERROR);
+                return "Interner Serverfehler!";
+            }
+        });
+    }
+
     /**
      * Regelt GET-Anfragen für Filmübersichten
      */
@@ -104,6 +119,44 @@ abstract class RestServer {
         get("/get-movies", ((request, response) -> {
             response.type("text/json; charset=utf-8");
             return DataBase.getAllMovies();
+        }));
+    }
+
+    private static void setupGetSaalplan() {
+        get("/get-saalplan/:id", ((request, response) -> {
+            try {
+                response.type("text/json; charset=utf-8");
+                return DataBase.getSaalPlan(Integer.parseInt(request.params("id"))).toString();
+            } catch (InvalidException e1) {
+                response.status(NOT_FOUND);
+                return "Kein Saal mit dieser Id gefunden";
+            } catch (SQLException e2) {
+                e2.printStackTrace();
+                response.status(SERVER_ERROR);
+                return "Interner Serverfehler!";
+            }
+        }));
+    }
+
+    private static void setupUploadSaalplan() {
+        post("admin/upload-saalplan", ((request, response) -> {
+            try {
+                DataBase.uploadSaalplan(gson.fromJson(request.body(), JsonObject.class));
+                return "";
+            } catch (ParameterException pe) {
+                response.status(BAD_REQUEST);
+                return pe.getMessage();
+            } catch (SQLIntegrityConstraintViolationException e2) {
+                response.status(CONFLICT);
+                return "Es existiert bereits Kinosaal mit diesem Namen!";
+            } catch (UnauthorisedException e3) {
+                response.status(FORBIDDEN);
+                return e3.getMessage();
+            } catch (Exception e4) {
+                response.status(SERVER_ERROR);
+                e4.printStackTrace();
+                return "Interner Server Fehler";
+            }
         }));
     }
 
@@ -126,5 +179,8 @@ abstract class RestServer {
         setupCreateAccount();
         setupActivate();
         setupGetMovies();
+        setupUploadSaalplan();
+        setupGetSaalplan();
+        setupGetKategorien();
     }
 }
