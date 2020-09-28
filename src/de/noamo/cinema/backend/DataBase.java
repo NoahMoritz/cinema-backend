@@ -11,6 +11,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import de.noamo.cinema.backend.exceptions.InvalidException;
+import de.noamo.cinema.backend.exceptions.NotActiveException;
 import de.noamo.cinema.backend.exceptions.ParameterException;
 import de.noamo.cinema.backend.exceptions.UnauthorisedException;
 import org.apache.commons.codec.digest.DigestUtils;
@@ -78,10 +79,11 @@ abstract class DataBase {
 
         // Abfrage starten
         try (Connection connection = basicDataSource.getConnection();
-             PreparedStatement preparedStatement = connection.prepareStatement("SELECT rolle FROM konten WHERE email='" +
-                     email + "' AND passwort='" + DigestUtils.md5Hex(passwort) + "';");
+             PreparedStatement preparedStatement = connection.prepareStatement("SELECT rolle, aktiv FROM konten " +
+                     "WHERE email='" + email + "' AND passwort='" + DigestUtils.md5Hex(passwort) + "';");
              ResultSet rs = preparedStatement.executeQuery()) {
             if (rs.next()) {
+                if (!rs.getBoolean("aktiv")) throw new UnauthorisedException("Konto nicht aktiv");
                 if (rs.getInt("rolle") < pLevel)
                     throw new UnauthorisedException("Keine ausreichenden Rechte! Benoetigt wird Stufe " +
                             pLevel + ". Sie haben: " + rs.getInt("rolle"));
@@ -165,11 +167,17 @@ abstract class DataBase {
                 "PRIMARY KEY (benutzerid), " + // Eindeutige ID des Benutzers als Key
                 "UNIQUE (email));").executeUpdate();
 
+        pConnection.prepareStatement("CREATE TABLE IF NOT EXISTS authCodes(" +
+                "benutzerid INT UNSIGNED NOT NULL," +
+                "authCode VARCHAR(36) NOT NULL," +
+                "erstellt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP," +
+                "FOREIGN KEY (benutzerid) REFERENCES konten(benutzerid));").executeUpdate();
+
         pConnection.prepareStatement("CREATE TABLE IF NOT EXISTS aktivierungsSchluessel(benutzerid INT UNSIGNED NOT NULL, " + // Eindeutige ID des Benutzers
                 "aktivierungs_schluessel VARCHAR(36) NOT NULL, " +
                 "erstellt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, " + // Aktivierungsschlüssel für das Konto
                 "UNIQUE (aktivierungs_schluessel), " + // Ein Aktivierungsschlüssel muss eindeutig sein
-                "FOREIGN KEY (benutzerid) REFERENCES konten(benutzerid))").executeUpdate();
+                "FOREIGN KEY (benutzerid) REFERENCES konten(benutzerid));").executeUpdate();
 
         pConnection.prepareStatement("CREATE TABLE IF NOT EXISTS adressen(" +
                 "benutzerid INT UNSIGNED NOT NULL, " + // Eindeutige ID des Benutzers, zu dem dise Adresse gehört
@@ -327,6 +335,82 @@ abstract class DataBase {
             }
 
             return saal;
+        }
+    }
+
+    /**
+     * Ermöglicht es einem Nutzer seine eigenen Nutzerinfos abzufragen.
+     *
+     * @param pAuthCode Ein AuthCode, mit dem der Benutzer sich identifizieren kann.
+     * @return {@link JsonObject}, dass die Nutzerinfos enthält
+     * @throws ParameterException    Falls das Format des AuthCodes ungültig ist
+     * @throws SQLException          Falls es Problem mit der Verbindung zur Datenbank gibt
+     * @throws UnauthorisedException Falls der AuthCode ungültig ist
+     */
+    static JsonObject getUserInfos(String pAuthCode) throws ParameterException, SQLException, UnauthorisedException {
+        if (pAuthCode == null || pAuthCode.length() != 36)
+            throw new ParameterException("AuthCode hat ein falsches Format!");
+        try (Connection connection = basicDataSource.getConnection();
+             PreparedStatement preparedStatement1 = connection.prepareStatement("SELECT * FROM konten " +
+                     "WHERE benutzerid=(SELECT benutzerid FROM authCodes WHERE authCode='" + DigestUtils.md5Hex(pAuthCode) + "');");
+             ResultSet resultSet1 = preparedStatement1.executeQuery()) {
+            if (!resultSet1.next()) throw new UnauthorisedException("AuthCode ungültig!");
+            JsonObject jsonObject = new JsonObject();
+            jsonObject.addProperty("name", resultSet1.getString("name"));
+            jsonObject.addProperty("email", resultSet1.getString("email"));
+            jsonObject.addProperty("erstellt", resultSet1.getTimestamp("erstellt").toString());
+            JsonArray adressen = new JsonArray();
+            try (PreparedStatement preparedStatement2 = connection.prepareStatement("SELECT * FROM adressen " +
+                    "WHERE benutzerid=" + resultSet1.getInt("benutzerid") + ";");
+                 ResultSet resultSet2 = preparedStatement2.executeQuery()) {
+                while (resultSet2.next()) {
+                    JsonObject temp = new JsonObject();
+                    temp.addProperty("anrede", resultSet2.getString("anrede"));
+                    temp.addProperty("vorname", resultSet2.getString("vorname"));
+                    temp.addProperty("nachname", resultSet2.getString("nachname"));
+                    temp.addProperty("strasse", resultSet2.getString("strasse"));
+                    temp.addProperty("plz", resultSet2.getString("plz"));
+                    String tel = resultSet2.getString("telefon");
+                    if (tel != null) temp.addProperty("telefon", tel);
+                    adressen.add(temp);
+                }
+            }
+            if (adressen.size() > 0) jsonObject.add("adressen", adressen);
+            return jsonObject;
+        }
+    }
+
+    /**
+     * Führt einen Login durch und gibt sowohl den Namen als auch den Auth Code zurück.
+     *
+     * @param pJson {@link JsonObject} mit 'email' und 'passwort'
+     * @return {@link JsonObject} mit 'authToken' und 'name'
+     * @throws ParameterException    Falls 'email' oder 'passwort' im JsonObjekt nicht vorhanden ist
+     * @throws SQLException          Falls ein Fehler mit der Verbindung zur Datenbank auftritt
+     * @throws UnauthorisedException Falls die Kombination aus Email und Passwort falsch ist
+     * @throws NotActiveException    Falls das Konto noch nicht aktiviert ist
+     */
+    static JsonObject login(JsonObject pJson) throws ParameterException, SQLException, UnauthorisedException, NotActiveException {
+        if (!pJson.has("email") || !pJson.has("passwort"))
+            throw new ParameterException("Es fehlen die Popertys 'email' und/oder 'passwort'");
+
+        String email = pJson.get("email").getAsString(), passwort = pJson.get("passwort").getAsString();
+
+        try (Connection connection = basicDataSource.getConnection();
+             PreparedStatement preparedStatement1 = connection.prepareStatement("SELECT benutzerid, name, aktiv FROM konten " +
+                     "WHERE email='" + email + "' AND passwort='" + DigestUtils.md5Hex(passwort) + "';");
+             ResultSet resultSet1 = preparedStatement1.executeQuery()) {
+            if (!resultSet1.next()) throw new UnauthorisedException("Email/Passwort Kombination falsch");
+            if (resultSet1.getBoolean("aktiv")) throw new NotActiveException("Das Konto ist nicht aktiviert");
+            JsonObject jsonObject = new JsonObject();
+            jsonObject.addProperty("name", resultSet1.getString("name"));
+            String authCode = UUID.randomUUID().toString();
+            try (PreparedStatement preparedStatement2 = connection.prepareStatement("INSERT INTO authCodes(benutzerid, " +
+                    "authCode) VALUES (" + resultSet1.getInt("benutzerid") + ", '" + DigestUtils.md5Hex(authCode) + "');")) {
+                preparedStatement2.executeUpdate();
+            }
+            jsonObject.addProperty("authToken", authCode);
+            return jsonObject;
         }
     }
 

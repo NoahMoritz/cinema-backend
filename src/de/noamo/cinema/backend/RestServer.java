@@ -138,6 +138,45 @@ abstract class RestServer {
         }));
     }
 
+    private static void setupGetUserInfos() {
+        get("/get-userinfos", ((request, response) -> {
+            try {
+                String authCode = request.headers("Auth");
+                JsonObject jsonObject = DataBase.getUserInfos(authCode);
+                response.type("text/json; charset=utf-8");
+                return jsonObject;
+            } catch (ParameterException e1) {
+                response.status(BAD_REQUEST);
+                return e1.getMessage();
+            } catch (UnauthorisedException e2) {
+                response.status(FORBIDDEN);
+                return e2.getMessage();
+            } catch (Exception e3) {
+                response.status(SERVER_ERROR);
+                e3.printStackTrace();
+                return "Interner Server Fehler";
+            }
+        }));
+    }
+
+    private static void setupLogin() {
+        get("/login", ((request, response) -> {
+            try {
+                return DataBase.login(gson.fromJson(request.body(), JsonObject.class));
+            } catch (ParameterException e1) {
+                response.status(BAD_REQUEST);
+                return e1.getMessage();
+            } catch (UnauthorisedException e2) {
+                response.status(FORBIDDEN);
+                return e2.getMessage();
+            } catch (Exception e3) {
+                response.status(SERVER_ERROR);
+                e3.printStackTrace();
+                return "Interner Serverfehler!";
+            }
+        }));
+    }
+
     private static void setupUploadSaalplan() {
         post("admin/upload-saalplan", ((request, response) -> {
             try {
@@ -182,5 +221,7 @@ abstract class RestServer {
         setupUploadSaalplan();
         setupGetSaalplan();
         setupGetKategorien();
+        setupGetUserInfos();
+        setupLogin();
     }
 }

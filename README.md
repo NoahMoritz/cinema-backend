@@ -94,4 +94,63 @@
     - Fehlercodes:
         - 400 (Bad Request): Fehlerhafte Anfrage
         - 403 (Forbidden): Der Account wird bereits verwendet
- 
+        - 500 (Server Error): Interner Serverfehler<br><br>
+ - <b>/get-userinfos</b>
+    - GET
+    - Fragt die Details eines Benutzers ab
+    - Erfodert im Header das Attribut "Auth" mit einem 36-Stelligem Auth-Code
+    - Fehlercodes:
+        - 400 (Bad Request): Fehlerhafte Anfrage
+        - 403 (Forbidden): Ungültiger Code
+        - 500 (Server Error): Interner Serverfehler
+    - Rückgabe minimal:
+        ```json
+        {
+          "name": "Max Mustermann",
+          "email": "max.mustermann@gmail.com",
+          "erstellt": "2020-09-23 15:43:00.0"
+        }
+        ```
+    - Rückgabe maximal:
+        ```json
+        {
+          "name": "Max Mustermann",
+          "email": "noah.hoelterhoff@gmail.com",
+          "erstellt": "2020-09-27 23:34:52.0",
+          "adressen": [
+            {
+              "anrede": "Herr",
+              "vorname": "Max",
+              "nachname": "Mustermann",
+              "strasse": "Musterstr. 4",
+              "plz": "12345",
+              "telefon": "01520 9574320"
+            },
+            {
+              "anrede": "Frau",
+              "vorname": "Maxine",
+              "nachname": "Musterfrau",
+              "strasse": "Musterstr. 3",
+              "plz": "12345"
+            }
+          ]
+        }
+        ```
+        <br>
+- <b>/login</b>
+    - GET
+    - Generiert einen Auth Key und gibt den Namen zurück
+    - Eingabe:
+        ```json
+        {
+          "passwort": "123456789",
+          "email": "max.mustermann@gmail.com"
+        }
+        ```
+    - Rückgabe:
+        ```json
+        {
+          "name":"Max Mustermann",
+          "authToken":"d8c5a09f-2c99-4ed0-bb11-4b8393938cf3"
+        }
+        ```
