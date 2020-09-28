@@ -138,7 +138,7 @@
         ```
         <br>
 - <b>/login</b>
-    - GET
+    - POST
     - Generiert einen Auth Key und gibt den Namen zurück
     - Eingabe:
         ```json
@@ -154,3 +154,8 @@
           "authToken":"d8c5a09f-2c99-4ed0-bb11-4b8393938cf3"
         }
         ```
+    - Fehlercodes:
+        - 400 (Bad Request): Falls 'email' und/oder 'passwort' im Body fehlt
+        - 403 (Forbidden): Falls die Kombination aus E-Mail und Passwort nicht stimmt
+        - 409 (Conflict): Falls das Konto noch nicht aktiv ist
+        - 500 (Server Error): Interner Serverfehler

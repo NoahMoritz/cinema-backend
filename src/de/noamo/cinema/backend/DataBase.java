@@ -401,7 +401,7 @@ abstract class DataBase {
                      "WHERE email='" + email + "' AND passwort='" + DigestUtils.md5Hex(passwort) + "';");
              ResultSet resultSet1 = preparedStatement1.executeQuery()) {
             if (!resultSet1.next()) throw new UnauthorisedException("Email/Passwort Kombination falsch");
-            if (resultSet1.getBoolean("aktiv")) throw new NotActiveException("Das Konto ist nicht aktiviert");
+            if (!resultSet1.getBoolean("aktiv")) throw new NotActiveException("Das Konto ist nicht aktiviert");
             JsonObject jsonObject = new JsonObject();
             jsonObject.addProperty("name", resultSet1.getString("name"));
             String authCode = UUID.randomUUID().toString();

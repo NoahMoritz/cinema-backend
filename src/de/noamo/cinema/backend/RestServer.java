@@ -11,6 +11,7 @@ import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonSyntaxException;
 import de.noamo.cinema.backend.exceptions.InvalidException;
+import de.noamo.cinema.backend.exceptions.NotActiveException;
 import de.noamo.cinema.backend.exceptions.ParameterException;
 import de.noamo.cinema.backend.exceptions.UnauthorisedException;
 
@@ -160,7 +161,7 @@ abstract class RestServer {
     }
 
     private static void setupLogin() {
-        get("/login", ((request, response) -> {
+        post("/login", ((request, response) -> {
             try {
                 return DataBase.login(gson.fromJson(request.body(), JsonObject.class));
             } catch (ParameterException e1) {
@@ -169,9 +170,12 @@ abstract class RestServer {
             } catch (UnauthorisedException e2) {
                 response.status(FORBIDDEN);
                 return e2.getMessage();
-            } catch (Exception e3) {
+            } catch (NotActiveException e3) {
+                response.status(CONFLICT);
+                return e3.getMessage();
+            } catch (Exception e4) {
                 response.status(SERVER_ERROR);
-                e3.printStackTrace();
+                e4.printStackTrace();
                 return "Interner Serverfehler!";
             }
         }));
