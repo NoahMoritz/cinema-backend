@@ -166,7 +166,8 @@ abstract class DataBase {
                 return uuid;
             }
         } catch (SQLIntegrityConstraintViolationException e) {
-            throw new ConflictException("Zu der angegeben Email-Adresse existiert bereits ein Konto!");
+            throw new ConflictException("Zu der angegeben Email-Adresse existiert bereits ein Konto. Falls Sie dieses " +
+                    "Konto besitzen und es deaktivert haben/das Passwort nicht mehr wissen, kontaktieren Sie den Kundenservice!");
         }
     }
 
@@ -565,6 +566,64 @@ abstract class DataBase {
             }
         }
         return "Ok";
+    }
+
+    /**
+     * Fügt einem Benutzer eine Adresse hinzu.
+     *
+     * @param authCode   Ein AuthCode, mit dem der Benutzer sich identifizieren kann.
+     * @param jsonObject Ein {@link JsonObject} mit der neuen Adresse. Notwendig sind die Attribute (als Strings)
+     *                   'anrede', 'vorname', 'nachname', 'strasse', 'plz', 'stadt' und 'stadt', während 'telefon' optional ist
+     * @return "Ok" bei Erfolg
+     * @throws BadRequestException   Falls die Anfrage ungültige oder fehlende Daten enthält
+     * @throws SQLException          Falls ein Fehler in der VErbindung zu der Datenbank auftritt
+     * @throws UnauthorisedException Falls Der AuthCode ungültig ist
+     */
+    static String addAdress(String authCode, JsonObject jsonObject) throws BadRequestException, SQLException, UnauthorisedException {
+        try {
+            // Attribute lesen
+            String anrede = jsonObject.get("anrede").getAsString();
+            String vorname = jsonObject.get("vorname").getAsString();
+            String nachname = jsonObject.get("nachname").getAsString();
+            String strasse = jsonObject.get("strasse").getAsString();
+            String plz = jsonObject.get("plz").getAsString();
+            String stadt = jsonObject.get("stadt").getAsString();
+            String telefon = (jsonObject.has("telefon") ? jsonObject.get("telefon").getAsString().replaceAll(" ", "") : null);
+
+            // Attribute prüfen
+            if (anrede.length() < 4)
+                throw new BadRequestException("Die Anrede muss min. 4 Zeichen haben (Herr, Frau) + ggf. Dr./Prof.");
+            if (vorname.length() < 2) throw new BadRequestException("Ein Vorname muss mindestens 2 Zeichen haben");
+            if (nachname.length() < 2) throw new BadRequestException("Ein Nachname muss mindestens 2 Zeichen haben");
+            if (strasse.length() < 2) throw new BadRequestException("Eine Straße muss mindestens 2 Zeichen haben");
+            if (!plz.matches("^[0-9]{5}$")) throw new BadRequestException("Ungültige Postleitzahl!");
+            if (stadt.length() < 2) throw new BadRequestException("Eine Stadt muss mindestens 2 Zeichen haben");
+            if (telefon != null && !telefon.matches("^\\+(?:[0-9]⋅?){6,14}[0-9]$"))
+                throw new BadRequestException("Telefonnummer ungültig (Internationales Format erforderlich)");
+
+            // SQL
+            try (Connection connection = basicDataSource.getConnection()) {
+                //Userid herausfinden
+                int userid;
+                try (PreparedStatement preparedStatement = connection.prepareStatement("SELECT benutzerid FROM authCodes WHERE auth_code='" +
+                        DigestUtils.md5Hex(authCode) + "';");
+                     ResultSet resultSet = preparedStatement.executeQuery()) {
+                    if (!resultSet.next()) throw new UnauthorisedException("AuthCode ungültig!");
+                    userid = resultSet.getInt("benutzerid");
+                }
+
+                try (PreparedStatement preparedStatement = connection.prepareStatement("INSERT INTO adressen(benutzerid, " +
+                        "anrede, vorname, nachname, strasse, plz, stadt" + (telefon == null ? "" : ", telefon") +
+                        ") VALUES ('" + userid + "', '" + anrede + "', '" + vorname + "', '" + nachname + "', '" + strasse + "', '" +
+                        plz + "', '" + stadt + "'" + (telefon == null ? "" : ", '" + telefon + "'") + ")")) {
+                    preparedStatement.executeUpdate();
+                }
+            }
+            return "OK";
+        } catch (NullPointerException | ClassCastException exception) {
+            throw new BadRequestException("Es wurden nicht alle Attribute erfolgreich mitgegeben. Notwendig sind (als Strings)" +
+                    " 'anrede', 'vorname', 'nachname', 'strasse', 'plz' und 'stadt', während 'telefon' optional ist");
+        }
     }
 
     /**

@@ -76,10 +76,9 @@ public abstract class Uploader {
             else if (s.startsWith("USERNAME=")) username = s.substring(9);
             else if (s.startsWith("PASSWORD=")) password = s.substring(9);
             else if (s.startsWith("PATHE=")) pathExternal = s.substring(6);
-            else if (s.startsWith("PATHL=")) pathLocal = s.substring(6);
+            else if (s.startsWith("PATHL=")) pathLocal = s.substring(6).replaceAll("%20", " ");
             else if (s.startsWith("SERVICE=")) serviceName = s.substring(8);
         }
-        pathLocal="C:\\Users\\noahh\\Google Drive\\Projekte\\Java\\cinema-backend\\out\\artifacts\\cinema_backend_jar/cinema-backend.jar";
         if (hostname == null || username == null || password == null || pathLocal == null || pathExternal == null || serviceName == null) {
             System.out.println("HOSTNAME, USERNAME, PASSWORD, PATHE, PATHL and SERVICE are mandatory arguments!");
             System.exit(1);

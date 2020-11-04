@@ -138,6 +138,13 @@ abstract class RestServer {
             response.type(TEXT_PLAIN);
             response.body(e.getMessage());
         });
+
+        // Conflict
+        exception(ConflictException.class, (e, request, response) -> {
+            response.status(409);
+            response.type(TEXT_PLAIN);
+            response.body(e.getMessage());
+        });
     }
 
     /**
@@ -148,6 +155,7 @@ abstract class RestServer {
         post("/login", (req, res) -> DataBase.login(gson.fromJson(req.body(), JsonObject.class)));
         post("/update-user", (req, res) -> DataBase.updateUser(req.headers("Auth"), gson.fromJson(req.body(), JsonObject.class)));
         post("/delete-adress/:id", (req, res) -> DataBase.deleteAdress(req.headers("Auth"), Integer.parseInt(req.params("id"))));
+        post("/add-adress", (req, res) -> DataBase.addAdress(req.headers("Auth"), gson.fromJson(req.body(), JsonObject.class)));
         get("/activate/:key", RestServer::activateAccount);
         post("/deactivateAccount", (req, res) -> DataBase.kontoDeaktivieren(req.headers("Auth"), req.body()));
         get("/get-movies", ((req, res) -> DataBase.getAktiveFilmeCached()));
