@@ -7,9 +7,14 @@
 
 package de.noamo.cinema.backend;
 
+import de.noamo.cinema.backend.exceptions.BadRequestException;
+
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.sql.Timestamp;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.Scanner;
 import java.util.regex.Pattern;
 
@@ -57,13 +62,23 @@ public class Util {
         }
     }
 
+    public static Timestamp stringToSQLTimestamp(String pTime) throws BadRequestException {
+        try {
+            SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd hh:mm");
+            Date parsedDate = dateFormat.parse(pTime);
+            return new java.sql.Timestamp(parsedDate.getTime());
+        } catch (Exception e) {
+            throw new BadRequestException("Der Zeitstempel hat ein ungültiges Format");
+        }
+    }
+
     /**
      * Analysiert den Link aus einem YouTube-Video und findend die Video-Id heraus
      *
      * @param pLink Link zu dem YouTube Video (entweder youtu.be, ein link mit watch?v=, oder die ID)
      * @return Die Video ID
      */
-    private static String youtubeLinkToVideoId(String pLink) {
+    public static String youtubeLinkToVideoId(String pLink) {
         if (pLink.length() == 11) return pLink;
         else if (pLink.contains("youtu.be")) return pLink.split("/", 4)[3];
         else if (pLink.contains("watch?v=")) return pLink.split(Pattern.quote("watch?v="), 2)[1].substring(0, 11);

@@ -10,15 +10,11 @@ package de.noamo.cinema.backend;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import de.noamo.cinema.backend.exceptions.InvalidException;
-import de.noamo.cinema.backend.exceptions.NotActiveException;
-import de.noamo.cinema.backend.exceptions.ParameterException;
-import de.noamo.cinema.backend.exceptions.UnauthorisedException;
+import de.noamo.cinema.backend.exceptions.*;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.dbcp2.BasicDataSource;
 
 import java.sql.*;
-import java.text.Normalizer;
 import java.util.UUID;
 
 /**
@@ -26,29 +22,31 @@ import java.util.UUID;
  * mit in einem Connection-Pool verwaltet ({@link BasicDataSource}).
  *
  * @author Noah Hoelterhoff
- * @version 21.09.2020
+ * @version 04.10.2020
  * @since 05.09.2020
  */
 abstract class DataBase {
     private final static int DPCP2_MAX_CON_IDLE = 6;
     private final static int DPCP2_MAX_OPEN_STATEMENTS = 50;
     private final static int DPCP2_MIN_CON_IDLE = 1;
+    private final static int TTL_KATEGORIEN = 1800000;
     private final static int TTL_MOVIE_LIST = 1800000;
     private static BasicDataSource basicDataSource;
-    private static CacheObject movies;
+    private static CacheObject<JsonArray> categories;
+    private static CacheObject<String> movies;
 
     /**
      * Die Methode aktiviert einen Account mit einem Aktivierungsschlüssel. Dieser Aktiverungsschlüssel befindet sich in
      * der Datenbank in der Tabelle "aktiverungsSchluessel".
      *
      * @param pAktivierungsSchluessel Der Aktivierungsschlüssel
-     * @throws ParameterException Falls der Schlüssel ein ungültiges Format hat (kein 36 Zeichen)
-     * @throws SQLException       Falls ein Problem in der Verbindung zu der Datenbank vorliegt
-     * @throws InvalidException   Falls der Schlüssel nicht existiert (oder bereits aktiviert wurde)
+     * @throws BadRequestException Falls der Schlüssel ein ungültiges Format hat (kein 36 Zeichen)
+     * @throws SQLException        Falls ein Problem in der Verbindung zu der Datenbank vorliegt
+     * @throws NotFoundException   Falls der Schlüssel nicht existiert (oder bereits aktiviert wurde)
      */
-    static void activateAccount(String pAktivierungsSchluessel) throws ParameterException, SQLException, InvalidException {
+    static void activateAccount(String pAktivierungsSchluessel) throws BadRequestException, SQLException, NotFoundException {
         // Parameterprüfung
-        if (pAktivierungsSchluessel.length() != 36) throw new ParameterException("Ungültiges Format!");
+        if (pAktivierungsSchluessel.length() != 36) throw new BadRequestException("Ungültiges Format!");
 
         // Account aktivieren
         try (Connection connection = basicDataSource.getConnection();
@@ -56,38 +54,54 @@ abstract class DataBase {
                      "(SELECT benutzerid FROM aktivierungsSchluessel WHERE aktivierungs_schluessel='" + pAktivierungsSchluessel + "')");
              PreparedStatement preparedStatement2 = connection.prepareStatement("DELETE FROM aktivierungsSchluessel WHERE " +
                      "aktivierungs_schluessel='" + pAktivierungsSchluessel + "';")) {
-            if (preparedStatement1.executeUpdate() == 0) throw new InvalidException("Ungültiger Aktivierungscode!");
+            if (preparedStatement1.executeUpdate() == 0) throw new NotFoundException("Ungültiger Aktivierungscode!");
             else preparedStatement2.executeUpdate();
         }
     }
 
     /**
+     * Blockt alle Anfragen, bei denen ein Konto nicht aktiv ist.
+     *
+     * @param resultSet Ein Resultset mit einer ausgewählten Reihe und der Spalte 'aktiv'
+     * @throws SQLException       Falls ein Fehler mit dem ResultSet auftritt
+     * @throws NotActiveException Falls das Konto nicht aktiv ist
+     */
+    private static void aktivBarriere(ResultSet resultSet) throws SQLException, NotActiveException {
+        int aktivCode = resultSet.getInt("aktiv");
+        if (aktivCode != 1)
+            throw new NotActiveException(
+                    "Das Konto wurde " + (aktivCode == 0 ? "noch nicht aktiviert!" : "deaktiviert!"));
+    }
+
+    /**
      * Prüft, ob ein Account autorisiert ist, eine bestimmte Aktion auszuführen
      *
-     * @param pJson  {@link JsonObject}, dass die Propertys {@code email} und {@code passwort} enthält
-     * @param pLevel Das Level, dass für diese Aktion mindestens benötigt wird
+     * @param authCode Ein Autorisierungscode für ein Konto
+     * @param pLevel   Das Level, dass für diese Aktion mindestens benötigt wird
      * @throws SQLException          Falls ein Problem in der Verbindung zu der Datenbank vorliegt
-     * @throws ParameterException    Falls die Attribute {@code email} und {@code passwort} nicht existieren
+     * @throws BadRequestException   Falls die Attribute {@code email} und {@code passwort} nicht existieren
      * @throws UnauthorisedException Falls der Nutzer für diese Aktion nicht autorisiert ist
      */
-    private static void authorize(JsonObject pJson, int pLevel) throws SQLException, ParameterException, UnauthorisedException {
-        // Parameter auslesen
-        if (!pJson.has("email") || !pJson.has("passwort")) throw
-                new ParameterException("Es fehlen die Popertys 'email' und/oder 'passwort'");
-        String email = pJson.get("email").getAsString();
-        String passwort = pJson.get("passwort").getAsString();
+    private static void authorizationBarriere(String authCode, int pLevel) throws SQLException, BadRequestException, UnauthorisedException, NotActiveException {
+        // Parameterprüfung
+        if (authCode == null) throw new BadRequestException("Es wurde kein AuthCode bereigestellt");
+        if (authCode.length() != 36)
+            throw new BadRequestException("Ungültiger AuthCode (ein gültiger Auth-Code hat 36 Zeichen)");
 
-        // Abfrage starten
+        // Zugehöriges Konto finden
         try (Connection connection = basicDataSource.getConnection();
              PreparedStatement preparedStatement = connection.prepareStatement("SELECT rolle, aktiv FROM konten " +
-                     "WHERE email='" + email + "' AND passwort='" + DigestUtils.md5Hex(passwort) + "';");
-             ResultSet rs = preparedStatement.executeQuery()) {
-            if (rs.next()) {
-                if (!rs.getBoolean("aktiv")) throw new UnauthorisedException("Konto nicht aktiv");
-                if (rs.getInt("rolle") < pLevel)
-                    throw new UnauthorisedException("Keine ausreichenden Rechte! Benoetigt wird Stufe " +
-                            pLevel + ". Sie haben: " + rs.getInt("rolle"));
-            } else throw new UnauthorisedException("Account mit diesen Anmeldedaten nicht gefunden");
+                     "WHERE benutzerid=(SELECT benutzerid FROM authCodes WHERE auth_code='" + DigestUtils.md5Hex(authCode) + "');");
+             ResultSet resultSet = preparedStatement.executeQuery()) {
+
+            // Konto prüfen
+            if (!resultSet.next()) throw new UnauthorisedException("Account mit diesen Anmeldedaten nicht gefunden");
+            aktivBarriere(resultSet);
+
+            // Prüfen, ob die Autorisierungsstufe des Kontos hoch genug ist
+            if (resultSet.getInt("rolle") < pLevel)
+                throw new UnauthorisedException("Keine ausreichenden Rechte! Benoetigt wird Stufe " +
+                        pLevel + ". Sie haben: " + resultSet.getInt("rolle"));
         }
     }
 
@@ -104,8 +118,8 @@ abstract class DataBase {
             dataBaseSetup(connection);
         }
 
-        basicDataSource = new BasicDataSource();
-        basicDataSource.setUrl(pUrl);
+        basicDataSource = new BasicDataSource(); // Connection Pool
+        basicDataSource.setUrl(pUrl); // URL für die Verbindung
         basicDataSource.setValidationQuery("SELECT benutzerid FROM konten");
         basicDataSource.setMinIdle(DPCP2_MIN_CON_IDLE);
         basicDataSource.setMaxIdle(DPCP2_MAX_CON_IDLE);
@@ -121,31 +135,38 @@ abstract class DataBase {
      * @param pPasswort Das Passwort im Klartext
      * @param pEmail    Eine eindeutige Email-Adresse für dieses Konto
      * @param pName     Der Name der Person, der dieses Konto gehört
+     * @param aktiv     Ob das Konto von anfang an aktiviert sein soll
      * @return Der Aktivierungscode, mit dem dieses Konto aktiviert werden kann
-     * @throws SQLException                             Falls ein Problem in der Verbindung zu der Datenbank vorliegt
-     * @throws SQLIntegrityConstraintViolationException Falls die Email bereits in der Datenbank vorhanden ist
-     * @throws ParameterException                       Falls ein Parameter nicht den Vorgaben entspricht
+     * @throws SQLException        Falls ein Problem in der Verbindung zu der Datenbank vorliegt
+     * @throws ConflictException   Falls die Email bereits in der Datenbank vorhanden ist
+     * @throws BadRequestException Falls ein Parameter nicht den Vorgaben entspricht
      */
-    static String createUser(String pPasswort, String pEmail, String pName) throws SQLException, ParameterException, SQLIntegrityConstraintViolationException {
+    static String createUser(String pPasswort, String pEmail, String pName, boolean aktiv) throws SQLException, BadRequestException, ConflictException {
         // Parameterprüfung
-        if (pPasswort.length() <= 8) throw new ParameterException("Das Passwort muss mehr als 8 Zeichen haben!");
+        if (pPasswort.length() <= 8) throw new BadRequestException("Das Passwort muss mehr als 8 Zeichen haben!");
         if (!pEmail.matches("^(.+)@(.+)$"))
-            throw new ParameterException("Die eingegebene Email-Adresse ist ungültig!");
+            throw new BadRequestException("Die eingegebene Email-Adresse ist ungültig!");
         if (pName.length() <= 5)
-            throw new ParameterException("Bitte geben Sie Ihren vollständigen Namen (Vor- und Nachname) ein!");
+            throw new BadRequestException("Bitte geben Sie Ihren vollständigen Namen (Vor- und Nachname) ein!");
 
         // Konto hinzufügen
         try (Connection connection = basicDataSource.getConnection();
-             PreparedStatement preparedStatement1 = connection.prepareStatement("INSERT INTO konten(passwort, email, name) " +
-                     "VALUES ('" + DigestUtils.md5Hex(pPasswort) + "', '" + pEmail + "', '" + pName + "');")) {
+             PreparedStatement preparedStatement1 = connection.prepareStatement("INSERT INTO konten(passwort, email, name, aktiv) " +
+                     "VALUES ('" + DigestUtils.md5Hex(pPasswort) + "', '" + pEmail + "', '" + pName + "', " + (aktiv ? 1 : 0) + ");")) {
             preparedStatement1.executeUpdate();
+
+            // Aktiverungscode generieren
             String uuid = UUID.randomUUID().toString();
+
+            // Aktiverungscode hochladen und zurück geben
             try (PreparedStatement preparedStatement2 = connection.prepareStatement("INSERT INTO aktivierungsSchluessel(" +
                     "benutzerid, aktivierungs_schluessel) VALUES ((SELECT benutzerid FROM konten WHERE email = '" + pEmail +
                     "'), '" + uuid + "');")) {
                 preparedStatement2.executeUpdate();
                 return uuid;
             }
+        } catch (SQLIntegrityConstraintViolationException e) {
+            throw new ConflictException("Zu der angegeben Email-Adresse existiert bereits ein Konto!");
         }
     }
 
@@ -156,27 +177,64 @@ abstract class DataBase {
      * @param pConnection Die Verbindung zu der Datenbank
      */
     private static void dataBaseSetup(Connection pConnection) throws SQLException {
+        // --- Kinosäle ---
+        pConnection.prepareStatement("CREATE TABLE IF NOT EXISTS kinosaele(" +
+                "saalid INT UNSIGNED NOT NULL AUTO_INCREMENT, " + // Eindeutige ID eines Kinosaals
+                "name VARCHAR(20) NOT NULL, " + // Der Name des Kinosaals
+                "width INT NOT NULL, " + // Die Breite des Saals in Pixeln
+                "height INT NOT NULL, " + // Die Höhe des Saals in Pixeln
+                "PRIMARY KEY (saalid)," + // SaalId als eindeutiger Schlüssel
+                "UNIQUE (name));").executeUpdate(); // Saalname als eindeutige Bezeichnung
+
+        pConnection.prepareStatement("CREATE TABLE IF NOT EXISTS kategorien(" +
+                "kategorieid INT UNSIGNED NOT NULL AUTO_INCREMENT, " + // Eindeutige ID für die Kategorie
+                "name VARCHAR(20) NOT NULL, " + // Name der Kategorie
+                "aufpreis DECIMAL(4,2) NOT NULL, " + // Aufpreis für dies Kategorie (z.B. +0.5 für 50ct teurer; negativ möglich)
+                "faktor DOUBLE UNSIGNED NOT NULL, " + // Faktor für einen Sitzplatz (z.B. 2 für doppelt so teuer wie normal)
+                "width INT UNSIGNED NOT NULL, " + // Breite eines Sitzes in Pixeln
+                "height INT UNSIGNED NOT NULL ," + // Höhe eines Sitzes in Pixeln
+                "color_hex VARCHAR(6) NOT NULL," + // HEX-Farbcode des Sitzes
+                "icon TEXT, " + // Icon für die Sitzplatzkategorie
+                "PRIMARY KEY (kategorieid), " + // kategorieid als eindeutiger Schlüssel
+                "UNIQUE (name));").executeUpdate(); // Name als eindeutige Bezeichnung (da es sonst zu Verwirrungen kommt)
+
+        pConnection.prepareStatement("CREATE TABLE IF NOT EXISTS saalPlaetze(" +
+                "platzid INT UNSIGNED NOT NULL AUTO_INCREMENT, " + // Eindeutige ID für jeden Platz
+                "saalid INT UNSIGNED NOT NULL, " + // Referenz auf den Saal, in dem der Platz ist
+                "kategorieid INT UNSIGNED NOT NULL," + // Referenz auf die Kategorie, zu der der Saal gehört
+                "reihe VARCHAR(1) NOT NULL, " + // Reihe des Platzes (für die Verständlichkeit bei Menschen)
+                "platz INT(2) NOT NULL, " + // Sitz des Platzes (für die Verständlichkeit bei Menschen)
+                "x INT UNSIGNED NOT NULL, " + // x-Koordinate des Platzes (ausgeend von der linken oberen Ecke)
+                "y INT UNSIGNED NOT NULL, " + // y-Koordinate des Platzes (ausgeend von der linken oberen Ecke)
+                "PRIMARY KEY (platzid), " + // Platz ID des eindeutiger Schlüssel
+                "UNIQUE (saalid,reihe,platz), " + // Eindeutige Kombination aus Saal Reihe und Platz (um Verwechlungen zu vermeiden)
+                "FOREIGN KEY (saalid) REFERENCES kinosaele(saalid), " +
+                "FOREIGN KEY (kategorieid) REFERENCES kategorien(kategorieid));").executeUpdate();
+
+        // --- Konten ---
         pConnection.prepareStatement("CREATE TABLE IF NOT EXISTS konten(" +
                 "benutzerid INT UNSIGNED NOT NULL AUTO_INCREMENT, " + // Eindeutige ID des Benutzers
                 "rolle INT(3) UNSIGNED NOT NULL DEFAULT 0, " + // Rolle des Nutzers (spielt für den Zugriff eine Rolle)
-                "aktiv BIT NOT NULL DEFAULT 0," + // Ob das Konto aktiviert wurde
+                "aktiv TINYINT(1) UNSIGNED NOT NULL DEFAULT 0, " + // Ob das Konto inaktiv(0), aktiv(1), deaktiviert(2) ist
                 "erstellt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, " + // Erstellungszeitpunkt des Accounts
                 "passwort VARCHAR(50) NOT NULL, " + // Das Passwort (für die Anmeldung)
                 "email VARCHAR(254) NOT NULL, " + // Eine Email-Adresse des Benutzers (für Infos über Probleme)
                 "name VARCHAR(60) NOT NULL, " + // Der Name der Person
                 "PRIMARY KEY (benutzerid), " + // Eindeutige ID des Benutzers als Key
-                "UNIQUE (email));").executeUpdate();
+                "UNIQUE (email));").executeUpdate(); // Email einzigartig (da sie zur Anmeldung dient)
 
         pConnection.prepareStatement("CREATE TABLE IF NOT EXISTS authCodes(" +
-                "benutzerid INT UNSIGNED NOT NULL," +
-                "authCode VARCHAR(36) NOT NULL," +
-                "erstellt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP," +
-                "FOREIGN KEY (benutzerid) REFERENCES konten(benutzerid));").executeUpdate();
+                "benutzerid INT UNSIGNED NOT NULL, " + // Referenz auf die eindeutige ID des Benutzers
+                "auth_code VARCHAR(36) NOT NULL, " + // Der Autorisierungscode des Benutzers
+                "erstellt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, " + // Erstellungszeitpunkt des Codes
+                "FOREIGN KEY (benutzerid) REFERENCES konten(benutzerid), " +
+                "UNIQUE (auth_code));").executeUpdate(); // Der AuthCode muss eindeutig sein um Fehler zu verhindern
 
-        pConnection.prepareStatement("CREATE TABLE IF NOT EXISTS aktivierungsSchluessel(benutzerid INT UNSIGNED NOT NULL, " + // Eindeutige ID des Benutzers
-                "aktivierungs_schluessel VARCHAR(36) NOT NULL, " +
-                "erstellt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, " + // Aktivierungsschlüssel für das Konto
-                "UNIQUE (aktivierungs_schluessel), " + // Ein Aktivierungsschlüssel muss eindeutig sein
+        pConnection.prepareStatement("CREATE TABLE IF NOT EXISTS aktivierungsSchluessel(" +
+                "benutzerid INT UNSIGNED NOT NULL, " + // Referenz auf die eindeutige ID des Benutzers
+                "aktivierungs_schluessel VARCHAR(36) NOT NULL, " + // Aktivierungsschlüssel für das Konto
+                "erstellt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, " + // Zeitpunkt der Erstellung des Schlüssels
+                "UNIQUE (aktivierungs_schluessel), " + // Der Schlüssel muss eindeutig sein
                 "FOREIGN KEY (benutzerid) REFERENCES konten(benutzerid));").executeUpdate();
 
         pConnection.prepareStatement("CREATE TABLE IF NOT EXISTS adressen(" +
@@ -187,56 +245,62 @@ abstract class DataBase {
                 "nachname VARCHAR(50) NOT NULL, " + // Der Nachname der Person an der Rechnungsadresse
                 "strasse VARCHAR(100) NOT NULL, " + // Straße inkl. Hausnummer
                 "plz INT(5) NOT NULL, " + // PLZ der Adresse
+                "stadt VARCHAR(30) NOT NULL, " + // Stadt der Adresse
                 "telefon VARCHAR(20), " + // Telefonnummer der Rechnungsadresse
                 "FOREIGN KEY (benutzerid) REFERENCES konten(benutzerid));").executeUpdate();
 
+        // --- Filme ---
         pConnection.prepareStatement("CREATE TABLE IF NOT EXISTS filme(" +
-                "filmid INT UNSIGNED NOT NULL AUTO_INCREMENT, " +
-                "name VARCHAR(100) NOT NULL, " +
-                "bild_link TEXT NOT NULL, " +
-                "hintergrund_bild_link TEXT NOT NULL, " +
-                "trailer_youtube TEXT NOT NULL, " +
-                "kurze_beschreibung TEXT NOT NULL, " +
-                "beschreibung TEXT NOT NULL, " +
-                "fsk TINYINT UNSIGNED NOT NULL, " +
-                "dauer TINYINT UNSIGNED NOT NULL," +
-                "land VARCHAR(20) NOT NULL, " +
-                "filmstart DATE NOT NULL, " +
-                "empfohlen BIT NOT NULL DEFAULT 0, " +
+                "filmid INT UNSIGNED NOT NULL AUTO_INCREMENT, " + // Eindeutige ID des Films
+                "name VARCHAR(100) NOT NULL, " + // Name des Films
+                "bild_link TEXT NOT NULL, " + // Link zu dem Cover des Films
+                "hintergrund_bild_link TEXT NOT NULL, " + // Link zu einem Hintergundbild für den Film
+                "trailer_youtube VARCHAR(11) NOT NULL, " + // YouTube-ID des Trailers
+                "kurze_beschreibung TEXT NOT NULL, " + // Kurzbeschreibung des Films
+                "beschreibung TEXT NOT NULL, " + // Lange Beschreibung des Films
+                "fsk TINYINT(2) UNSIGNED NOT NULL, " + // FSK Angabe des Films
+                "dauer TINYINT UNSIGNED NOT NULL," + // Dauer des Films in Minuten
+                "land VARCHAR(20) NOT NULL, " + // Produktionsland des Films
+                "filmstart DATE NOT NULL, " + // Startzeitpunkt des Films
+                "empfohlen BIT NOT NULL DEFAULT 0, " + // Ob der Film empfohlen wird, oder nicht
+                "aktiv BIT NOT NULL DEFAULT 1, " + // Ob der Film aktuell aktiv ist (oder nur noch für ehmalige Bestellungen)
                 "PRIMARY KEY (filmid));").executeUpdate();
 
-        pConnection.prepareStatement("CREATE TABLE IF NOT EXISTS kinosaele(" +
-                "saalid INT UNSIGNED NOT NULL AUTO_INCREMENT, " +
-                "name VARCHAR(20) NOT NULL, " +
-                "width INT NOT NULL, " +
-                "height INT NOT NULL, " +
-                "PRIMARY KEY (saalid)," +
-                "UNIQUE (name)" +
+        pConnection.prepareStatement("CREATE TABLE IF NOT EXISTS vorstellungen(" +
+                "vorstellungsid INT UNSIGNED NOT NULL AUTO_INCREMENT, " + // Eindeutige ID der Vorstellung
+                "filmid INT UNSIGNED NOT NULL, " + // Referenz auf dem Film
+                "saalid INT UNSIGNED NOT NULL, " + // Referenz auf den Saal
+                "basis_preis DOUBLE UNSIGNED NOT NULL, " + // Preis für den günstigsten Platz
+                "vorstellungsbeginn DATETIME NOT NULL, " + // Zeitpunkt, zu dem die Vorstellung beginnt
+                "3d bit NOT NULL DEFAULT 0, " +
+                "PRIMARY KEY (vorstellungsid), " +
+                "FOREIGN KEY (filmid) REFERENCES filme(filmid), " +
+                "FOREIGN KEY (saalid) REFERENCES kinosaele(saalid)" +
                 ");").executeUpdate();
 
-        pConnection.prepareStatement("CREATE TABLE IF NOT EXISTS kategorien(" +
-                "kategorieid INT UNSIGNED NOT NULL AUTO_INCREMENT, " +
-                "name VARCHAR(20) NOT NULL, " +
-                "aufpreis DECIMAL(4,2) NOT NULL, " +
-                "faktor DOUBLE UNSIGNED NOT NULL, " +
-                "width INT UNSIGNED NOT NULL, " +
-                "height INT UNSIGNED NOT NULL ," +
-                "color_hex VARCHAR(6) NOT NULL," +
-                "PRIMARY KEY (kategorieid)," +
-                "UNIQUE (name)" +
+        pConnection.prepareStatement("CREATE TABLE IF NOT EXISTS bestellungen(" +
+                "bestellnummer INT UNSIGNED NOT NULL AUTO_INCREMENT, " +
+                "vorstellungsid INT UNSIGNED NOT NULL, " +
+                "benutzerid INT UNSIGNED NOT NULL, " +
+                "anrede VARCHAR(30) NOT NULL, " + // Anrede ("Herr"/"Frau" + ggf. "Dr." oder "Prof.) der Person an der Rechnungsadresse
+                "vorname VARCHAR(50) NOT NULL, " + // Der Vorname der Person an der Rechnungsadresse
+                "nachname VARCHAR(50) NOT NULL, " + // Der Nachname der Person an der Rechnungsadresse
+                "strasse VARCHAR(100) NOT NULL, " + // Straße inkl. Hausnummer
+                "plz INT(5) NOT NULL, " + // PLZ der Adresse
+                "stadt VARCHAR(30) NOT NULL, " + // Stadt der Adresse
+                "telefon VARCHAR(20), " + // Telefonnummer der Rechnungsadresse
+                "PRIMARY KEY (bestellnummer), " +
+                "FOREIGN KEY (benutzerid) REFERENCES konten(benutzerid), " +
+                "FOREIGN KEY (vorstellungsid) REFERENCES vorstellungen(vorstellungsid)" +
                 ");").executeUpdate();
 
-        pConnection.prepareStatement("CREATE TABLE IF NOT EXISTS saalPlaetze(" +
-                "saalid INT UNSIGNED NOT NULL, " +
-                "kategorieid INT UNSIGNED NOT NULL," +
-                "reihe VARCHAR(1) NOT NULL, " +
-                "platz INT(2) NOT NULL, " +
-                "x INT UNSIGNED NOT NULL, " +
-                "y INT UNSIGNED NOT NULL, " +
-                "UNIQUE (saalid,reihe,platz), " +
-                "FOREIGN KEY (saalid) REFERENCES kinosaele(saalid), " +
-                "FOREIGN KEY (kategorieid) REFERENCES kategorien(kategorieid)" +
+        pConnection.prepareStatement("CREATE TABLE IF NOT EXISTS bestellungePlaetze(" +
+                "bestellnummer INT UNSIGNED NOT NULL, " +
+                "platzid INT UNSIGNED NOT NULL, " +
+                "preis DOUBLE UNSIGNED NOT NULL, " +
+                "UNIQUE (platzid, bestellnummer)" +
                 ");").executeUpdate();
+
         try (PreparedStatement ps_adminAccount = pConnection.prepareStatement("INSERT INTO konten(passwort, name, " +
                 "email, rolle, aktiv) VALUES ('" + DigestUtils.md5Hex("Initial") + "', 'Admin', 'info@noamo.de', 999, 1);")) {
             ps_adminAccount.executeUpdate();
@@ -244,16 +308,34 @@ abstract class DataBase {
     }
 
     /**
-     * Fragt eine Filmübersicht ab
+     * Fragt eine Filmübersicht ab. Ein Beispiel für eine Rückgabe ist:<br>
+     * <pre>{@code {
+     *   "erstellt": 1602494662519,
+     *   "filme": [
+     *      {
+     *       "filmid": 7,
+     *       "name": "Hello Again – Ein Tag für immer",
+     *       "bild_link": "https://download.noamo.de/images/cinema/hello_again.jpg",
+     *       "hintergrund_bild_link": "https://download.noamo.de/images/cinema/bg_hello_again.jpg",
+     *       "trailer_youtube_id": "G7nEpa04oDc",
+     *       "kurze_beschreibung": "Lorem ipsum dolor sit amet, consetetur sadipscing",
+     *       "beschreibung": "Lorem ipsum dolor sit amet, consetetur sadipscing elitr, sed diam nonumy eirmod tempor ",
+     *       "fsk": 6,
+     *       "dauer": 92,
+     *       "land": "Deutschland",
+     *       "filmstart": "2020-09-24",
+     *       "empfohlen": false
+     *     }
+     *   ]
+     * }}
      *
      * @return Die Filmübersicht als String im Json-Format
+     * @throws SQLException Bei Fehlern bei der Verbindung zu der Datenbank
      */
-    synchronized static String getAllMovies() {
-        // ggf. aus dem Cache laden
-        if (movies != null && movies.isAlive()) return movies.json;
-
+    static String getAktiveFilme() throws SQLException {
         try (Connection connection = basicDataSource.getConnection();
-             PreparedStatement preparedStatement = connection.prepareStatement("SELECT * FROM filme ORDER BY filmstart DESC");
+             PreparedStatement preparedStatement = connection.prepareStatement("SELECT * FROM filme WHERE aktiv=1" +
+                     " ORDER BY filmstart DESC");
              ResultSet resultSet = preparedStatement.executeQuery()) {
 
             // Json Objekt erstellen
@@ -281,14 +363,47 @@ abstract class DataBase {
             }
 
             // Neues JsonObjekt in den Cache speichern
-            movies = new CacheObject(json, TTL_MOVIE_LIST);
-        } catch (SQLException e) {
-            Start.log(2, "Die Filmliste konnte nicht abgefragt werden! (" + e.getMessage() + ")");
+            movies = new CacheObject<>(json.toString(), TTL_MOVIE_LIST);
+            return movies.cache;
         }
-        return movies.json;
     }
 
-    static JsonArray getKateogorien() throws SQLException {
+    /**
+     * Fragt eine aktuelle ggf. gecachde Variante von {@link DataBase#getAktiveFilme()} ab.
+     */
+    static String getAktiveFilmeCached() throws SQLException {
+        if (movies == null || movies.isNotAlive()) return getAktiveFilme();
+        return movies.cache;
+    }
+
+    /**
+     * Fragt alle Sitzkategorien ab, die existieren. Ein Rückgabe kann z.B. sein:<br>
+     * <pre>{@code [
+     *  {
+     *   "kategorieid": 1,
+     *   "name": "Parkett",
+     *   "aufpreis": 0.0,
+     *   "faktor": 1.0,
+     *   "width": 20,
+     *   "height": 20,
+     *   "color_hex": "#FF00FF"
+     *  },
+     *  {
+     *   "kategorieid": 2,
+     *   "name": "Loveseat",
+     *   "aufpreis": 1.0,
+     *   "faktor": 2.0,
+     *   "width": 45,
+     *   "height": 20,
+     *   "color_hex": "#FF00FF",
+     *   "icon": "",
+     *  },
+     * ]}
+     *
+     * @return Ein {@link JsonArray}, das alle Sitze enthält
+     * @throws SQLException Bei Fehlern bei der Verbindung zu der Datenbank
+     */
+    static JsonArray getKategorien() throws SQLException {
         try (Connection connection = basicDataSource.getConnection();
              PreparedStatement preparedStatement = connection.prepareStatement("SELECT * FROM kategorien");
              ResultSet rs = preparedStatement.executeQuery()) {
@@ -302,13 +417,52 @@ abstract class DataBase {
                 temp.addProperty("width", rs.getInt("width"));
                 temp.addProperty("height", rs.getInt("height"));
                 temp.addProperty("color_hex", '#' + rs.getString("color_hex"));
+                String iconLink = rs.getString("icon");
+                if (iconLink != null) temp.addProperty("icon", iconLink);
                 kategorien.add(temp);
             }
+            categories = new CacheObject<>(kategorien, TTL_KATEGORIEN);
             return kategorien;
         }
     }
 
-    static JsonObject getSaalPlan(int saalid) throws SQLException, InvalidException {
+    /**
+     * Fragt eine aktuelle ggf. gecachde Variante von {@link DataBase#getKategorien()} ()} ab.
+     */
+    static JsonArray getKategorienCached() throws SQLException {
+        if (categories == null || categories.isNotAlive()) return getKategorien();
+        else return categories.cache;
+    }
+
+    /**
+     * Fragt alle Details zu einem Saal ab. Ein Beispiel für eine Rückgabe ist:<br>
+     * <pre>{@code {
+     *     "name": "Kino 1",
+     *     "width": 368,
+     *     "height": 184,
+     *     "sitze": [
+     *     {
+     *       "kategorie": 1,
+     *       "reihe": "A",
+     *       "platz": 1,
+     *       "x": 5,
+     *       "y": 5
+     *     },
+     *     {
+     *       "kategorie": 1,
+     *       "reihe": "A",
+     *       "platz": 2,
+     *       "x": 30,
+     *       "y": 5
+     *     }
+     * }}
+     *
+     * @param saalid Die ID des Saals, zu dem die Details abgefragt werden sollen
+     * @return Ein {@link JsonObject}, das die Details enthält
+     * @throws SQLException      Falls ein Fehler in der Verbindung zu der Datenbank auftritt
+     * @throws NotFoundException Falls der Saal nicht gefunden wurde
+     */
+    static JsonObject getSaalPlan(int saalid) throws SQLException, NotFoundException {
         try (Connection connection = basicDataSource.getConnection();
              PreparedStatement preparedStatement1 = connection.prepareStatement("SELECT * FROM kinosaele WHERE saalid=" + saalid + ";");
              PreparedStatement preparedStatement2 = connection.prepareStatement("SELECT * FROM saalPlaetze WHERE saalid=" + saalid + ";");
@@ -316,7 +470,7 @@ abstract class DataBase {
              ResultSet r2 = preparedStatement2.executeQuery()) {
             JsonObject saal = new JsonObject();
 
-            if (!r1.next()) throw new InvalidException("Unbekannter Saal");
+            if (!r1.next()) throw new NotFoundException("Kein Saal mit dieser Id gefunden");
             saal.addProperty("name", r1.getString("name"));
             saal.addProperty("width", r1.getInt("width"));
             saal.addProperty("height", r1.getInt("height"));
@@ -343,22 +497,31 @@ abstract class DataBase {
      *
      * @param pAuthCode Ein AuthCode, mit dem der Benutzer sich identifizieren kann.
      * @return {@link JsonObject}, dass die Nutzerinfos enthält
-     * @throws ParameterException    Falls das Format des AuthCodes ungültig ist
+     * @throws BadRequestException   Falls das Format des AuthCodes ungültig ist
      * @throws SQLException          Falls es Problem mit der Verbindung zur Datenbank gibt
      * @throws UnauthorisedException Falls der AuthCode ungültig ist
      */
-    static JsonObject getUserInfos(String pAuthCode) throws ParameterException, SQLException, UnauthorisedException {
+    static JsonObject getUserInfos(String pAuthCode) throws BadRequestException, SQLException, UnauthorisedException {
+        // Parameterprüfung
         if (pAuthCode == null || pAuthCode.length() != 36)
-            throw new ParameterException("AuthCode hat ein falsches Format!");
+            throw new BadRequestException("AuthCode hat ein falsches Format oder wurde nicht mitgegeben!");
+
+        // Konto anhand des AuthCodes finden
         try (Connection connection = basicDataSource.getConnection();
              PreparedStatement preparedStatement1 = connection.prepareStatement("SELECT * FROM konten " +
-                     "WHERE benutzerid=(SELECT benutzerid FROM authCodes WHERE authCode='" + DigestUtils.md5Hex(pAuthCode) + "');");
+                     "WHERE benutzerid=(SELECT benutzerid FROM authCodes WHERE auth_code='" + DigestUtils.md5Hex(pAuthCode) + "');");
              ResultSet resultSet1 = preparedStatement1.executeQuery()) {
+
+            // Falls kein AuthCode gefunden wurde
             if (!resultSet1.next()) throw new UnauthorisedException("AuthCode ungültig!");
+
+            // Hauptattribute in Rückgabeobjekt einfügen
             JsonObject jsonObject = new JsonObject();
             jsonObject.addProperty("name", resultSet1.getString("name"));
             jsonObject.addProperty("email", resultSet1.getString("email"));
             jsonObject.addProperty("erstellt", resultSet1.getTimestamp("erstellt").toString());
+
+            // Adressen abfragen und der Rückgabe hinzufügen
             JsonArray adressen = new JsonArray();
             try (PreparedStatement preparedStatement2 = connection.prepareStatement("SELECT * FROM adressen " +
                     "WHERE benutzerid=" + resultSet1.getInt("benutzerid") + ";");
@@ -376,7 +539,176 @@ abstract class DataBase {
                 }
             }
             if (adressen.size() > 0) jsonObject.add("adressen", adressen);
+
+            // Zurückgeben
             return jsonObject;
+        }
+    }
+
+    /**
+     * Fragt alle Vorstellungen zu einem oder allen Filmen ab. Es werden nur zukünftige Vorstellungen zurück gegeben
+     *
+     * @param pFilmId Die ID des Filmes, von dem man die Vorstellung wissen will (0, wenn man alle Filme wissen will)
+     * @return Ein JsonArray, dass die Vorstellungen enthält
+     * @throws SQLException      Falls ein Fehler in der Vebrindung zu der Datenbank auftritt
+     * @throws NotFoundException Falls keine Vorstellung gefunden wurde
+     */
+    static JsonArray getVorstellungen(int pFilmId) throws SQLException, NotFoundException {
+        try (Connection connection = basicDataSource.getConnection();
+             PreparedStatement preparedStatement = connection.prepareStatement("SELECT * FROM vorstellungen " +
+                     "INNER JOIN kinosaele on vorstellungen.saalid = kinosaele.saalid WHERE " +
+                     (pFilmId == 0 ? "" : "filmid=" + pFilmId + " AND ") + "vorstellungsbeginn > CURRENT_TIMESTAMP " +
+                     "ORDER BY vorstellungsbeginn;");
+             ResultSet resultSet = preparedStatement.executeQuery()) {
+            if (!resultSet.next()) throw new NotFoundException("Keine Vorstellung gefunden!");
+            JsonArray array = new JsonArray();
+            JsonObject temp;
+            do {
+                temp = new JsonObject();
+                temp.addProperty("vorstellungsid", resultSet.getInt("vorstellungsid"));
+                temp.addProperty("3d", resultSet.getBoolean("3d"));
+                if (pFilmId == 0) temp.addProperty("filmid", resultSet.getInt("filmid"));
+                temp.addProperty("saalName", resultSet.getString("name"));
+                temp.addProperty("vorstellungsbeginn", resultSet.getTimestamp("vorstellungsbeginn").toString());
+                temp.addProperty("basisPreis", resultSet.getDouble("basis_preis"));
+                array.add(temp);
+            } while (resultSet.next());
+            return array;
+        }
+    }
+
+    /**
+     * Gibt Details zu einer Vorstellung zurück. Eine Rückgabe könnte z.B. sein:<br>
+     * <pre>{@code {
+     *   "saalName": "Kino 1",
+     *   "3d": true,
+     *   "filmid": 2,
+     *   "basisPreis": 12.0,
+     *   "width": 368,
+     *   "height": 184,
+     *   "kategorien": [
+     *      {
+     *       "kategorieid": 1,
+     *       "name": "Parkett",
+     *       "aufpreis": 0.0,
+     *       "faktor": 1.0,
+     *       "width": 20,
+     *       "height": 20,
+     *       "color_hex": "#FF00FF"
+     *     },
+     *     {
+     *       "kategorieid": 2,
+     *       "name": "Loge",
+     *       "aufpreis": 1.5,
+     *       "faktor": 1.0,
+     *       "width": 20,
+     *       "height": 20,
+     *       "color_hex": "#FF0000"
+     *     }
+     *   ]
+     * }}
+     *
+     * @param pVorstellungsId Die ID von der Vorstellung, zu der man Details haben möchte
+     * @return Ein {@link JsonObject} mit dem oben beschriebene Inhalt
+     * @throws SQLException Falls ein Fehler in der Verbindung zu der Datenbank auftritt
+     * @throws NotFoundException Falls die Vorstellung nicht gefunden wurde
+     * @throws BadRequestException Falls ID ungültig ist (d.h falls es eine Zahl < 0 ist)
+     */
+    static JsonObject getVorstellungsDetails(int pVorstellungsId) throws SQLException, NotFoundException, BadRequestException {
+        // Parameterprüfung
+        if (pVorstellungsId < 1) throw new BadRequestException("Ungültige Vorstellungsid");
+
+        // Alle Infos zu der bestimmte Vorstellung abfragen
+        try (Connection connection = basicDataSource.getConnection();
+             PreparedStatement preparedStatement1 = connection.prepareStatement("SELECT * FROM vorstellungen INNER " +
+                     "JOIN kinosaele on vorstellungen.saalid = kinosaele.saalid WHERE vorstellungsid=" + pVorstellungsId + ";");
+             ResultSet resultSet1 = preparedStatement1.executeQuery()) {
+
+            // Filtern, falls nichts gefunden wurde
+            if (!resultSet1.next()) throw new NotFoundException("Die Vorstellung wurde nicht gefunden!");
+
+            // Metadaten zu der Vorstellung abfragen
+            JsonObject reVal = new JsonObject();
+            reVal.addProperty("saalName", resultSet1.getString("name"));
+            reVal.addProperty("3d", resultSet1.getBoolean("3d"));
+            reVal.addProperty("filmid", resultSet1.getInt("filmid"));
+            reVal.addProperty("basisPreis", resultSet1.getDouble("basis_preis"));
+            reVal.addProperty("width", resultSet1.getInt("width"));
+            reVal.addProperty("height", resultSet1.getInt("height"));
+            reVal.add("kategorien", getKategorienCached());
+
+            // Sitze abfragen
+            JsonArray sitze = new JsonArray();
+            try (PreparedStatement preparedStatement2 = connection.prepareStatement("SELECT * FROM saalPlaetze LEFT " +
+                    "JOIN (SELECT platzid from bestellungePlaetze p INNER JOIN bestellungen b ON p.bestellnummer = " +
+                    "b.bestellnummer WHERE vorstellungsid = " + pVorstellungsId + ") AS b ON saalPlaetze.platzid = b.platzid;");
+                 ResultSet resultSet2 = preparedStatement2.executeQuery()) {
+
+                // Alle Sitze in Array einfügen
+                JsonObject temp;
+                while (resultSet2.next()) {
+                    temp = new JsonObject();
+                    temp.addProperty("id", resultSet2.getInt("platzid"));
+                    temp.addProperty("reihe", resultSet2.getString("reihe"));
+                    temp.addProperty("platz", resultSet2.getInt("platz"));
+                    temp.addProperty("kategorie", resultSet2.getInt("kategorieid"));
+                    temp.addProperty("x", resultSet2.getInt("x"));
+                    temp.addProperty("y", resultSet2.getInt("y"));
+                    temp.addProperty("belegt", resultSet2.getInt("b.platzid") != 0);
+                    sitze.add(temp);
+                }
+            }
+            reVal.add("sitze", sitze);
+
+            // JsonObjekt zurück geben
+            return reVal;
+        }
+    }
+
+    static String insertVorstellung(String pAuthCode, JsonObject pJson) throws BadRequestException, SQLException, UnauthorisedException, NotFoundException, NotActiveException {
+        // Zugangberechtigung prüfen
+        authorizationBarriere(pAuthCode, 700);
+
+        // Parameterprüfung
+        if (pJson == null) throw new BadRequestException("Kein Json-Objekt vorhanden");
+        if (!pJson.has("filmid")) throw new BadRequestException("In dem Json-Objekt fehlt das Attribut 'filmid'");
+        if (!pJson.has("saalid")) throw new BadRequestException("In dem Json-Objekt fehlt das Attribut 'saalid'");
+        if (!pJson.has("basis_preis"))
+            throw new BadRequestException("In dem Json-Objekt fehlt das Attribut 'basis_preis'");
+        if (!pJson.has("vorstellungsbeginn"))
+            throw new BadRequestException("In dem Json-Objekt fehlt das Attribut 'vorstellungsbeginn'");
+
+        // Film einfügen
+        try (Connection connection = basicDataSource.getConnection();
+             PreparedStatement p = connection.prepareStatement("INSERT INTO vorstellungen(filmid, " +
+                     "saalid, basis_preis, vorstellungsbeginn) VALUES (?,?,?,?);")) {
+            p.setInt(1, pJson.get("filmid").getAsInt());
+            p.setInt(2, pJson.get("saalid").getAsInt());
+            p.setDouble(3, pJson.get("basis_preis").getAsDouble());
+            p.setTimestamp(4, Util.stringToSQLTimestamp(pJson.get("vorstellungsbeginn").getAsString()));
+            p.executeUpdate();
+            return "Vorstellung erstellt";
+        } catch (SQLIntegrityConstraintViolationException e) {
+            throw new NotFoundException("'saalid' oder 'filmid' konnte nicht zugeordnet werden!");
+        }
+    }
+
+    /**
+     * Diese Methode deaktiviert ein Konto. Dadurch kann auf das Konto nicht mehr zugegriffen werden. Der AktivCode
+     * eines deaktiviereten Kontos ist dabei 3.
+     *
+     * @param pAuthCode Ein AuthCode um den Benutzer zu identifizieren
+     * @param pPasswort Das Passwort zu zusätzlichen Bestätigung
+     * @throws SQLException      Falls ein Fehler in der Verbindung zur Datenbank auftritt
+     * @throws NotFoundException Falls ein Konto ungültig ist
+     */
+    static String kontoDeaktivieren(String pAuthCode, String pPasswort) throws SQLException, NotFoundException {
+        try (Connection connection = basicDataSource.getConnection();
+             PreparedStatement preparedStatement = connection.prepareStatement("UPDATE konten SET aktiv=2 WHERE passwort='" +
+                     DigestUtils.md5Hex(pPasswort) + "' AND benutzerid=(SELECT benutzerid FROM authCodes WHERE auth_code='" +
+                     DigestUtils.md5Hex(pAuthCode) + "');")) {
+            if (preparedStatement.executeUpdate() == 0) throw new NotFoundException("AuthCode oder Passwort falsch!");
+            return "Ihr Konto wurde erfolgreich deaktiviert";
         }
     }
 
@@ -385,37 +717,46 @@ abstract class DataBase {
      *
      * @param pJson {@link JsonObject} mit 'email' und 'passwort'
      * @return {@link JsonObject} mit 'authToken' und 'name'
-     * @throws ParameterException    Falls 'email' oder 'passwort' im JsonObjekt nicht vorhanden ist
+     * @throws BadRequestException   Falls 'email' oder 'passwort' im JsonObjekt nicht vorhanden ist
      * @throws SQLException          Falls ein Fehler mit der Verbindung zur Datenbank auftritt
      * @throws UnauthorisedException Falls die Kombination aus Email und Passwort falsch ist
      * @throws NotActiveException    Falls das Konto noch nicht aktiviert ist
      */
-    static JsonObject login(JsonObject pJson) throws ParameterException, SQLException, UnauthorisedException, NotActiveException {
+    static JsonObject login(JsonObject pJson) throws BadRequestException, SQLException, UnauthorisedException, NotActiveException {
+        // Parameterprüfung & Parameter lesen
         if (!pJson.has("email") || !pJson.has("passwort"))
-            throw new ParameterException("Es fehlen die Popertys 'email' und/oder 'passwort'");
-
+            throw new BadRequestException("Es fehlen die Popertys 'email' und/oder 'passwort'");
         String email = pJson.get("email").getAsString(), passwort = pJson.get("passwort").getAsString();
 
+        // Zugehöriges Konto finden
         try (Connection connection = basicDataSource.getConnection();
              PreparedStatement preparedStatement1 = connection.prepareStatement("SELECT benutzerid, name, aktiv FROM konten " +
                      "WHERE email='" + email + "' AND passwort='" + DigestUtils.md5Hex(passwort) + "';");
              ResultSet resultSet1 = preparedStatement1.executeQuery()) {
+
+            // Falsche Anmeldedaten filtern & Prüfen, ob das Konto aktiv ist
             if (!resultSet1.next()) throw new UnauthorisedException("Email/Passwort Kombination falsch");
-            if (!resultSet1.getBoolean("aktiv")) throw new NotActiveException("Das Konto ist nicht aktiviert");
+            aktivBarriere(resultSet1);
+
+            // Rückgabe Json-Objekt erstellen
             JsonObject jsonObject = new JsonObject();
+            String authCode = UUID.randomUUID().toString(); // AuthCode generieren
             jsonObject.addProperty("name", resultSet1.getString("name"));
-            String authCode = UUID.randomUUID().toString();
+            jsonObject.addProperty("authToken", authCode);
+
+            // AuthCode in Datenbank hochladen
             try (PreparedStatement preparedStatement2 = connection.prepareStatement("INSERT INTO authCodes(benutzerid, " +
-                    "authCode) VALUES (" + resultSet1.getInt("benutzerid") + ", '" + DigestUtils.md5Hex(authCode) + "');")) {
+                    "auth_code) VALUES (" + resultSet1.getInt("benutzerid") + ", '" + DigestUtils.md5Hex(authCode) + "');")) {
                 preparedStatement2.executeUpdate();
             }
-            jsonObject.addProperty("authToken", authCode);
+
+            // Objekt zurückgeben
             return jsonObject;
         }
     }
 
-    static void uploadSaalplan(JsonObject jsonObject) throws SQLException, ParameterException, UnauthorisedException {
-        authorize(jsonObject, 700);
+    static void uploadSaalplan(String pAuthCode, JsonObject jsonObject) throws SQLException, BadRequestException, UnauthorisedException, NotActiveException {
+        authorizationBarriere(pAuthCode, 700);
 
         String name = jsonObject.get("name").getAsString();
         int width = jsonObject.get("width").getAsInt();
@@ -450,25 +791,30 @@ abstract class DataBase {
     }
 
     /**
-     * Ein Cache-Objekt beinhaltet
+     * Ein Cache-Objekt, dass Daten zwischenspeichert
+     *
+     * @param <T> Typ des Objektes, was geachet werden soll
      */
-    private static class CacheObject {
+    private static class CacheObject<T> {
         private final long aliveUntil;
-        private final String json;
+        private final T cache;
 
         /**
          * Erstellt ein Cache-Objekt.
          *
-         * @param jsonObject Das Objekt, dass in dem Cache gespeichert werden soll
-         * @param ttl        Time To Live (Wie lange das JsonObject verwendet werden kann (in ms))
+         * @param pCache Das Objekt, dass in dem Cache gespeichert werden soll
+         * @param ttl    Time To Live (Wie lange das JsonObject verwendet werden kann (in ms))
          */
-        private CacheObject(JsonObject jsonObject, int ttl) {
-            json = Normalizer.normalize(jsonObject.toString(), Normalizer.Form.NFKC);
+        private CacheObject(T pCache, int ttl) {
+            cache = pCache;
             aliveUntil = ttl + System.currentTimeMillis();
         }
 
-        private boolean isAlive() {
-            return System.currentTimeMillis() < movies.aliveUntil;
+        /**
+         * Fragt ab, ob das Objekt noch valide ({@code true}) ist oder erneutert ({@code false}) werden muss
+         */
+        private boolean isNotAlive() {
+            return System.currentTimeMillis() >= aliveUntil;
         }
     }
 }

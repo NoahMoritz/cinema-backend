@@ -8,19 +8,19 @@
 package de.noamo.cinema.backend.exceptions;
 
 /**
- * Fehlerklasse für Aktionen, bei denen der Nutzer unautorisiert ist (falsche Anmeldedaten oder keine Berechtigung)
+ * Fehlerklasse für Aktionen, bei denen die Anfrage einen Konflikt auslöst
  *
  * @author Noah Hoelterhoff
- * @version 25.09.2020
- * @since 25.09.2020
+ * @version 12.10.2020
+ * @since 12.10.2020
  */
-public class UnauthorisedException extends Exception {
+public class ConflictException extends Exception {
     /**
-     * Erstellt eine neue {@link UnauthorisedException} mit konfigurierbarer Fehlermeldung.
+     * Erstellt eine neue {@link ConflictException} mit konfigurierbarer Fehlermeldung.
      *
      * @param pMessage Fehlermeldung (genauen Grund angeben)
      */
-    public UnauthorisedException(String pMessage) {
+    public ConflictException(String pMessage) {
         super(pMessage);
     }
 }

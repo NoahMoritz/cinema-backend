@@ -8,19 +8,19 @@
 package de.noamo.cinema.backend.exceptions;
 
 /**
- * Fehlerklasse für Werte, die ungültig sind.
+ * Fehlerklasse für Eingaben, zu denen nichts gefunden wurde
  *
  * @author Noah Hoelterhoff
  * @version 21.09.2020
  * @since 15.09.2020
  */
-public class InvalidException extends Exception {
+public class NotFoundException extends Exception {
     /**
-     * Erstellt eine neue {@link InvalidException} mit konfigurierbarer Fehlermeldung.
+     * Erstellt eine neue {@link NotFoundException} mit konfigurierbarer Fehlermeldung.
      *
      * @param pMessage Fehlermeldung (genauen Grund angeben)
      */
-    public InvalidException(String pMessage) {
+    public NotFoundException(String pMessage) {
         super(pMessage);
     }
 }
