@@ -146,6 +146,8 @@ abstract class RestServer {
     private static void setupRoutes() {
         post("/create-account", RestServer::createAccount);
         post("/login", (req, res) -> DataBase.login(gson.fromJson(req.body(), JsonObject.class)));
+        post("/update-user", (req, res) -> DataBase.updateUser(req.headers("Auth"), gson.fromJson(req.body(), JsonObject.class)));
+        post("/delete-adress/:id", (req, res) -> DataBase.deleteAdress(req.headers("Auth"), Integer.parseInt(req.params("id"))));
         get("/activate/:key", RestServer::activateAccount);
         post("/deactivateAccount", (req, res) -> DataBase.kontoDeaktivieren(req.headers("Auth"), req.body()));
         get("/get-movies", ((req, res) -> DataBase.getAktiveFilmeCached()));

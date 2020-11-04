@@ -238,6 +238,7 @@ abstract class DataBase {
                 "FOREIGN KEY (benutzerid) REFERENCES konten(benutzerid));").executeUpdate();
 
         pConnection.prepareStatement("CREATE TABLE IF NOT EXISTS adressen(" +
+                "adressenid INT UNSIGNED NOT NULL AUTO_INCREMENT, " +
                 "benutzerid INT UNSIGNED NOT NULL, " + // Eindeutige ID des Benutzers, zu dem dise Adresse gehört
                 "erstellt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, " + // Zeitpunkt des Hinzufügens der Adresse
                 "anrede VARCHAR(30) NOT NULL, " + // Anrede ("Herr"/"Frau" + ggf. "Dr." oder "Prof.) der Person an der Rechnungsadresse
@@ -246,7 +247,8 @@ abstract class DataBase {
                 "strasse VARCHAR(100) NOT NULL, " + // Straße inkl. Hausnummer
                 "plz INT(5) NOT NULL, " + // PLZ der Adresse
                 "stadt VARCHAR(30) NOT NULL, " + // Stadt der Adresse
-                "telefon VARCHAR(20), " + // Telefonnummer der Rechnungsadresse
+                "telefon VARCHAR(20), " +
+                "PRIMARY KEY (adressenid), " + // Telefonnummer der Rechnungsadresse
                 "FOREIGN KEY (benutzerid) REFERENCES konten(benutzerid));").executeUpdate();
 
         // --- Filme ---
@@ -304,7 +306,8 @@ abstract class DataBase {
         try (PreparedStatement ps_adminAccount = pConnection.prepareStatement("INSERT INTO konten(passwort, name, " +
                 "email, rolle, aktiv) VALUES ('" + DigestUtils.md5Hex("Initial") + "', 'Admin', 'info@noamo.de', 999, 1);")) {
             ps_adminAccount.executeUpdate();
-        } catch (SQLIntegrityConstraintViolationException ignored) {} // Tritt immer auf, wenn der Admin Account schon existiert
+        } catch (SQLIntegrityConstraintViolationException ignored) {
+        } // Tritt immer auf, wenn der Admin Account schon existiert
     }
 
     /**
@@ -493,6 +496,78 @@ abstract class DataBase {
     }
 
     /**
+     * Aktualiser die Daten von einem Nutzer. Die Eingabe ist ein {@link JsonObject} mit den möglichen Propertys "email"
+     * , "name" und "passwort". Alle Attribute können vorhanden sein, müssen es aber nicht.
+     *
+     * @param authCode   Ein AuthCode, mit dem der Benutzer sich identifizieren kann.
+     * @param jsonObject {@link JsonObject}, dass die Nutzerinfos, die aktualisiert werden sollen, enthält
+     * @return "OK", wenn es geklappt hat.
+     * @throws SQLException        Falls ein Fehler in der Vebrindung zu der Datenbank auftritt
+     * @throws BadRequestException Falls das Passwort zu kurz, der Name zu kurz oder die Email-Adresse ungültig ist
+     */
+    static String updateUser(String authCode, JsonObject jsonObject) throws SQLException, BadRequestException, ConflictException, UnauthorisedException {
+        // Werte auslesen
+        String email = (jsonObject.has("email") ? jsonObject.get("email").getAsString() : null);
+        String name = (jsonObject.has("name") ? jsonObject.get("name").getAsString() : null);
+        String passwort = (jsonObject.has("passwort") ? jsonObject.get("passwort").getAsString() : null);
+
+        // Werte prüfen
+        if (email == null && name == null && passwort == null)
+            throw new BadRequestException("Es wurden keine Parameter mitgegeben, die geändert werden sollen (Möglich ist \"email\", \"name\" und \"passwort\")");
+        if (email != null && !email.matches("^(.+)@(.+)$"))
+            throw new BadRequestException("Die neue Email-Adresse ist ungültig!");
+        if (name != null && name.length() <= 5)
+            throw new BadRequestException("Bitte geben Sie Ihren vollständigen Namen (Vor- und Nachname) ein!");
+        if (passwort != null && passwort.length() <= 8)
+            throw new BadRequestException("Das Passwort muss mehr als 8 Zeichen haben!");
+
+        // In String formatieren
+        String update = (email == null ? "" : "email='" + email + "'");
+        update += (name == null ? "" : (update.length() == 0 ? "" : " AND ") + "name='" + name + "'");
+        update += (passwort == null ? "" : (update.length() == 0 ? "" : " AND ") + "passwort='" + passwort + "'");
+
+        // Ausführen
+        try (Connection connection = basicDataSource.getConnection();
+             PreparedStatement preparedStatement = connection.prepareStatement("UPDATE konten SET " + update +
+                     " WHERE benutzerid = (SELECT benutzerid FROM authCodes WHERE auth_code = '" + DigestUtils.md5Hex(authCode) + "');")) {
+            if (preparedStatement.executeUpdate() == 0) throw new UnauthorisedException("AuthCode ungültig!");
+        } catch (SQLIntegrityConstraintViolationException e) {
+            throw new ConflictException("Zu der angegeben Email-Adresse existiert bereits ein anderes Konto!");
+        }
+        return "Ok";
+    }
+
+    /**
+     * Löscht eine Adresse aus dem System. Die ID lässt sich einer Adresse eindeutig zuordnen
+     *
+     * @param authCode Ein AuthCode, mit dem der Benutzer sich identifizieren kann.
+     * @param pId      Die ID der Adresse, die gelöscht werden soll
+     * @return "Ok", wenn es geklappt hat
+     * @throws SQLException          Falls ein Fehler in der Verbindung zu der Datenbank auftritt
+     * @throws UnauthorisedException Falls der AuthCode ungültig ist
+     * @throws BadRequestException   Falls keine Adresse mit dieser ID gefunden wurde
+     */
+    static String deleteAdress(String authCode, int pId) throws SQLException, UnauthorisedException, BadRequestException {
+        try (Connection connection = basicDataSource.getConnection()) {
+            // Userid herausfinden
+            int userid;
+            try (PreparedStatement preparedStatement = connection.prepareStatement("SELECT benutzerid FROM authCodes WHERE auth_code='" +
+                    DigestUtils.md5Hex(authCode) + "';");
+                 ResultSet resultSet = preparedStatement.executeQuery()) {
+                if (!resultSet.next()) throw new UnauthorisedException("AuthCode ungültig!");
+                userid = resultSet.getInt("benutzerid");
+            }
+
+            // Adresse löschen
+            try (PreparedStatement preparedStatement = connection.prepareStatement("DELETE FROM adressen WHERE adressenid=" + pId + " AND benutzerid=" + userid + ";")) {
+                if (preparedStatement.executeUpdate() == 0)
+                    throw new BadRequestException("Es wurde keine Adresse mit dieser ID gefunden");
+            }
+        }
+        return "Ok";
+    }
+
+    /**
      * Ermöglicht es einem Nutzer seine eigenen Nutzerinfos abzufragen.
      *
      * @param pAuthCode Ein AuthCode, mit dem der Benutzer sich identifizieren kann.
@@ -528,6 +603,7 @@ abstract class DataBase {
                  ResultSet resultSet2 = preparedStatement2.executeQuery()) {
                 while (resultSet2.next()) {
                     JsonObject temp = new JsonObject();
+                    temp.addProperty("adressenid", resultSet2.getString("adressenid"));
                     temp.addProperty("anrede", resultSet2.getString("anrede"));
                     temp.addProperty("vorname", resultSet2.getString("vorname"));
                     temp.addProperty("nachname", resultSet2.getString("nachname"));
