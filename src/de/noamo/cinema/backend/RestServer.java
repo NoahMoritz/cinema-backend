@@ -145,6 +145,10 @@ abstract class RestServer {
             response.type(TEXT_PLAIN);
             response.body(e.getMessage());
         });
+
+        // Error Pages
+        notFound("404 Not Found");
+        internalServerError("500 Internal Server Error");
     }
 
     /**
@@ -165,6 +169,7 @@ abstract class RestServer {
         get("/vorstellungen", (req, res) -> DataBase.getVorstellungen(0));
         get("/vorstellung-details/:id", (req, res) -> DataBase.getVorstellungsDetails(Integer.parseInt(req.params("id"))));
         get("/get-userinfos", (req, res) -> DataBase.getUserInfos(req.headers("Auth")));
+        get("/saele", (req, res) -> DataBase.getAllSaeleCached());
 
         // Admin Commands
         path("/admin", () -> {

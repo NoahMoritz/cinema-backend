@@ -29,11 +29,13 @@ abstract class DataBase {
     private final static int DPCP2_MAX_CON_IDLE = 6;
     private final static int DPCP2_MAX_OPEN_STATEMENTS = 50;
     private final static int DPCP2_MIN_CON_IDLE = 1;
-    private final static int TTL_KATEGORIEN = 1800000;
-    private final static int TTL_MOVIE_LIST = 1800000;
+    private final static int TTL_KATEGORIEN = 21600000; // 6 Stunden
+    private final static int TTL_MOVIE_LIST = 1800000; // 30 Minuten
+    private final static int TTL_SAELE = 43200000; // 12 Stunden
     private static BasicDataSource basicDataSource;
     private static CacheObject<JsonArray> categories;
     private static CacheObject<String> movies;
+    private static CacheObject<String> saele;
 
     /**
      * Die Methode aktiviert einen Account mit einem Aktivierungsschlüssel. Dieser Aktiverungsschlüssel befindet sich in
@@ -124,6 +126,37 @@ abstract class DataBase {
         basicDataSource.setMinIdle(DPCP2_MIN_CON_IDLE);
         basicDataSource.setMaxIdle(DPCP2_MAX_CON_IDLE);
         basicDataSource.setMaxOpenPreparedStatements(DPCP2_MAX_OPEN_STATEMENTS);
+    }
+
+    /**
+     * Fragt alle vorhandenen Kinosäle ab.
+     *
+     * @return Ein {@link String} im Json-Format
+     * @throws SQLException Falls ein Problem in der Verbindung zu der Datenbank vorliegt
+     */
+    static String getAllSaele() throws SQLException {
+        try (Connection connection = basicDataSource.getConnection();
+             PreparedStatement preparedStatement = connection.prepareStatement("SELECT saalid, name FROM kinosaele");
+             ResultSet rs = preparedStatement.executeQuery()) {
+            JsonArray json = new JsonArray();
+            while (rs.next()) {
+                JsonObject temp = new JsonObject();
+                temp.addProperty("saalid", rs.getString("saalid"));
+                temp.addProperty("name", rs.getString("name"));
+                json.add(temp);
+            }
+            saele = new CacheObject<>(json.toString(), TTL_SAELE);
+            return json.toString();
+        }
+    }
+
+    /**
+     * Hat die selbe Funktion wie {@link DataBase#getAllSaele()}, fragt die Daten aber nicht gewzungenermaßen aus der
+     * Datenbank ab, sondern versucht ein gecachtes Objekt zu verwenden.
+     */
+    static String getAllSaeleCached() throws SQLException {
+        if (saele == null || saele.isNotAlive()) return getAllSaele();
+        return saele.cache;
     }
 
     /**
