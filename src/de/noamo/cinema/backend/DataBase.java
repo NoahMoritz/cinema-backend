@@ -276,8 +276,7 @@ abstract class DataBase {
                 "benutzerid INT UNSIGNED NOT NULL, " + // Eindeutige ID des Benutzers, zu dem dise Adresse gehört
                 "erstellt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, " + // Zeitpunkt des Hinzufügens der Adresse
                 "anrede VARCHAR(30) NOT NULL, " + // Anrede ("Herr"/"Frau" + ggf. "Dr." oder "Prof.) der Person an der Rechnungsadresse
-                "vorname VARCHAR(50) NOT NULL, " + // Der Vorname der Person an der Rechnungsadresse
-                "nachname VARCHAR(50) NOT NULL, " + // Der Nachname der Person an der Rechnungsadresse
+                "name VARCHAR(50) NOT NULL, " + // Der Name der Person an der Rechnungsadresse
                 "strasse VARCHAR(100) NOT NULL, " + // Straße inkl. Hausnummer
                 "plz INT(5) NOT NULL, " + // PLZ der Adresse
                 "stadt VARCHAR(30) NOT NULL, " + // Stadt der Adresse
@@ -319,8 +318,7 @@ abstract class DataBase {
                 "vorstellungsid INT UNSIGNED NOT NULL, " +
                 "benutzerid INT UNSIGNED NOT NULL, " +
                 "anrede VARCHAR(30) NOT NULL, " + // Anrede ("Herr"/"Frau" + ggf. "Dr." oder "Prof.) der Person an der Rechnungsadresse
-                "vorname VARCHAR(50) NOT NULL, " + // Der Vorname der Person an der Rechnungsadresse
-                "nachname VARCHAR(50) NOT NULL, " + // Der Nachname der Person an der Rechnungsadresse
+                "name VARCHAR(50) NOT NULL, " + // Der Name der Person an der Rechnungsadresse
                 "strasse VARCHAR(100) NOT NULL, " + // Straße inkl. Hausnummer
                 "plz INT(5) NOT NULL, " + // PLZ der Adresse
                 "stadt VARCHAR(30) NOT NULL, " + // Stadt der Adresse
@@ -606,7 +604,7 @@ abstract class DataBase {
      *
      * @param authCode   Ein AuthCode, mit dem der Benutzer sich identifizieren kann.
      * @param jsonObject Ein {@link JsonObject} mit der neuen Adresse. Notwendig sind die Attribute (als Strings)
-     *                   'anrede', 'vorname', 'nachname', 'strasse', 'plz', 'stadt' und 'stadt', während 'telefon' optional ist
+     *                   'anrede', 'name', 'strasse', 'plz', 'stadt' und 'stadt', während 'telefon' optional ist
      * @return "Ok" bei Erfolg
      * @throws BadRequestException   Falls die Anfrage ungültige oder fehlende Daten enthält
      * @throws SQLException          Falls ein Fehler in der VErbindung zu der Datenbank auftritt
@@ -616,8 +614,7 @@ abstract class DataBase {
         try {
             // Attribute lesen
             String anrede = jsonObject.get("anrede").getAsString();
-            String vorname = jsonObject.get("vorname").getAsString();
-            String nachname = jsonObject.get("nachname").getAsString();
+            String name = jsonObject.get("name").getAsString();
             String strasse = jsonObject.get("strasse").getAsString();
             String plz = jsonObject.get("plz").getAsString();
             String stadt = jsonObject.get("stadt").getAsString();
@@ -626,8 +623,7 @@ abstract class DataBase {
             // Attribute prüfen
             if (anrede.length() < 4)
                 throw new BadRequestException("Die Anrede muss min. 4 Zeichen haben (Herr, Frau) + ggf. Dr./Prof.");
-            if (vorname.length() < 2) throw new BadRequestException("Ein Vorname muss mindestens 2 Zeichen haben");
-            if (nachname.length() < 2) throw new BadRequestException("Ein Nachname muss mindestens 2 Zeichen haben");
+            if (name.length() < 5) throw new BadRequestException("Bitte geben Sie den vollständigen Namen ein");
             if (strasse.length() < 2) throw new BadRequestException("Eine Straße muss mindestens 2 Zeichen haben");
             if (!plz.matches("^[0-9]{5}$")) throw new BadRequestException("Ungültige Postleitzahl!");
             if (stadt.length() < 2) throw new BadRequestException("Eine Stadt muss mindestens 2 Zeichen haben");
@@ -646,8 +642,8 @@ abstract class DataBase {
                 }
 
                 try (PreparedStatement preparedStatement = connection.prepareStatement("INSERT INTO adressen(benutzerid, " +
-                        "anrede, vorname, nachname, strasse, plz, stadt" + (telefon == null ? "" : ", telefon") +
-                        ") VALUES ('" + userid + "', '" + anrede + "', '" + vorname + "', '" + nachname + "', '" + strasse + "', '" +
+                        "anrede, name, strasse, plz, stadt" + (telefon == null ? "" : ", telefon") +
+                        ") VALUES ('" + userid + "', '" + anrede + "', '" + name + "', '" + strasse + "', '" +
                         plz + "', '" + stadt + "'" + (telefon == null ? "" : ", '" + telefon + "'") + ")")) {
                     preparedStatement.executeUpdate();
                 }
@@ -655,7 +651,7 @@ abstract class DataBase {
             return "OK";
         } catch (NullPointerException | ClassCastException exception) {
             throw new BadRequestException("Es wurden nicht alle Attribute erfolgreich mitgegeben. Notwendig sind (als Strings)" +
-                    " 'anrede', 'vorname', 'nachname', 'strasse', 'plz' und 'stadt', während 'telefon' optional ist");
+                    " 'anrede', 'name', 'strasse', 'plz' und 'stadt', während 'telefon' optional ist");
         }
     }
 
@@ -697,8 +693,7 @@ abstract class DataBase {
                     JsonObject temp = new JsonObject();
                     temp.addProperty("adressenid", resultSet2.getString("adressenid"));
                     temp.addProperty("anrede", resultSet2.getString("anrede"));
-                    temp.addProperty("vorname", resultSet2.getString("vorname"));
-                    temp.addProperty("nachname", resultSet2.getString("nachname"));
+                    temp.addProperty("name", resultSet2.getString("name"));
                     temp.addProperty("strasse", resultSet2.getString("strasse"));
                     temp.addProperty("plz", resultSet2.getString("plz"));
                     String tel = resultSet2.getString("telefon");
