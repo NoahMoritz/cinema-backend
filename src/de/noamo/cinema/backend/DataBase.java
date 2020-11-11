@@ -15,6 +15,7 @@ import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.dbcp2.BasicDataSource;
 
 import java.sql.*;
+import java.util.Random;
 import java.util.UUID;
 
 /**
@@ -284,6 +285,15 @@ abstract class DataBase {
                 "PRIMARY KEY (adressenid), " + // Telefonnummer der Rechnungsadresse
                 "FOREIGN KEY (benutzerid) REFERENCES konten(benutzerid));").executeUpdate();
 
+        pConnection.prepareStatement("CREATE TABLE IF NOT EXISTS changeEmail(" +
+                "benutzerid INT UNSIGNED NOT NULL, " +
+                "neue_email VARCHAR(254) NOT NULL, " +
+                "alte_email_key INT(5) UNSIGNED NOT NULL, " +
+                "neue_email_key INT(5) UNSIGNED NOT NULL, " +
+                "erstellt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, " +
+                "UNIQUE (benutzerid), " + // Zeitpunkt des Hinzufügens der Keys
+                "FOREIGN KEY (benutzerid) REFERENCES konten(benutzerid));").executeUpdate();
+
         // --- Filme ---
         pConnection.prepareStatement("CREATE TABLE IF NOT EXISTS filme(" +
                 "filmid INT UNSIGNED NOT NULL AUTO_INCREMENT, " + // Eindeutige ID des Films
@@ -336,7 +346,7 @@ abstract class DataBase {
                 ");").executeUpdate();
 
         try (PreparedStatement ps_adminAccount = pConnection.prepareStatement("INSERT INTO konten(passwort, name, " +
-                "email, rolle, aktiv) VALUES ('" + DigestUtils.md5Hex("Initial") + "', 'Admin', 'info@noamo.de', 999, 1);")) {
+                "email, rolle, aktiv) VALUES ('" + DigestUtils.md5Hex("Initial123") + "', 'Admin', 'info@noamo.de', 999, 1);")) {
             ps_adminAccount.executeUpdate();
         } catch (SQLIntegrityConstraintViolationException ignored) {
         } // Tritt immer auf, wenn der Admin Account schon existiert
@@ -409,6 +419,79 @@ abstract class DataBase {
     static String getAktiveFilmeCached() throws SQLException {
         if (movies == null || movies.isNotAlive()) return getAktiveFilme();
         return movies.cache;
+    }
+
+    static String changeEmailConfirm(String pAuthCode, JsonObject pJsonObject) throws SQLException, BadRequestException, UnauthorisedException, ConflictException {
+        try {
+            int newEmailKey = pJsonObject.get("newEmailKey").getAsInt();
+            int oldEmailKey = pJsonObject.get("oldEmailKey").getAsInt();
+            try (Connection connection = basicDataSource.getConnection();
+                 PreparedStatement preparedStatement1 = connection.prepareStatement("SELECT benutzerid, neue_email, neue_email_key, alte_email_key FROM changeEmail " +
+                         "WHERE benutzerid=(SELECT benutzerid FROM authCodes WHERE auth_code = '" + DigestUtils.md5Hex(pAuthCode) + "');");
+                 ResultSet resultSet = preparedStatement1.executeQuery()) {
+
+                if (!resultSet.next()) throw new UnauthorisedException("AuthCode ungültig");
+                if (newEmailKey != resultSet.getInt("neue_email_key"))
+                    throw new ConflictException("Key für die neue Email ungültig!");
+                if (oldEmailKey != resultSet.getInt("alte_email_key"))
+                    throw new ConflictException("Key für die alte Email ungültig!");
+                String newEmail = resultSet.getString("neue_email"); // Neue Email abfragen
+                int benutzerid = resultSet.getInt("benutzerid"); // Benutzerid auslesen
+
+                // Neue Email einfügen
+                try (PreparedStatement preparedStatement2 = connection.prepareStatement("UPDATE konten SET email='" +
+                        newEmail + "' WHERE benutzerid=" + benutzerid + ";")) {
+                    preparedStatement2.executeUpdate();
+                }
+
+                // Änderungseintrag löschen
+                try (PreparedStatement preparedStatement2 = connection.prepareStatement("DELETE FROM changeEmail WHERE benutzerid = " + benutzerid + ";")) {
+                    preparedStatement2.executeUpdate();
+                }
+            }
+            return "OK Email wurde geändert";
+        } catch (NullPointerException | ClassCastException exception) {
+            throw new BadRequestException("Es wurden nicht alle Attribute erfolgreich mitgegeben. Notwendig sind (als Integer)" +
+                    " 'newEmailKey' und 'oldEmailKey'");
+        }
+    }
+
+    static String changeEmailRequest(String pAuthCode, JsonObject pJsonObject) throws BadRequestException, SQLException, UnauthorisedException {
+        try {
+            String passwort = pJsonObject.get("passwort").getAsString();
+            String newEmail = pJsonObject.get("newEmail").getAsString();
+            try (Connection connection = basicDataSource.getConnection();
+                 PreparedStatement preparedStatement1 = connection.prepareStatement("SELECT benutzerid, email, name " +
+                         "FROM konten WHERE benutzerid = (SELECT benutzerid FROM authCodes WHERE auth_code = '" + DigestUtils.md5Hex(pAuthCode) +
+                         "') AND passwort='" + DigestUtils.md5Hex(passwort) + "';");
+                 ResultSet resultSet = preparedStatement1.executeQuery()) {
+                if (!resultSet.next()) throw new UnauthorisedException("AuthCode oder Passwort ungültig");
+
+                int benutzerid = resultSet.getInt("benutzerid");
+                String oldEmail = resultSet.getString("email");
+                String name = resultSet.getString("name");
+                int oldEmailKey = new Random().nextInt(89999) + 10000;
+                int newEmailKey = new Random().nextInt(89999) + 10000;
+
+                // Alten Datensätz ggf. löschen
+                try (PreparedStatement preparedStatement2 = connection.prepareStatement("DELETE FROM changeEmail WHERE benutzerid = " + benutzerid + ";")) {
+                    preparedStatement2.executeUpdate();
+                }
+
+                // Neuen Datensatz einfügen
+                try (PreparedStatement preparedStatement3 = connection.prepareStatement("INSERT INTO changeEmail(benutzerid, alte_email, neue_email, alte_email_key, neue_email_key) VALUES(" + benutzerid + ", '" + oldEmail +
+                        "', '" + newEmail + "', " + oldEmailKey + ", " + newEmailKey + ");");) {
+                    preparedStatement3.executeUpdate();
+                }
+
+                // Mails senden
+                Mail.sendEmailChangeMail(name, oldEmail, newEmail, oldEmailKey, newEmailKey);
+            }
+            return "OK Bitte senden bestätigen Sie die Änderung über /changeEmail/confirm";
+        } catch (NullPointerException | ClassCastException exception) {
+            throw new BadRequestException("Es wurden nicht alle Attribute erfolgreich mitgegeben. Notwendig sind (als Strings)" +
+                    " 'passwort' und 'newEmail'");
+        }
     }
 
     /**

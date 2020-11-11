@@ -40,6 +40,14 @@ abstract class Mail {
         sendMail(pName, pEmail, "DHBW Kino - Aktivierungscode", htmlText);
     }
 
+    static void sendEmailChangeMail(final String pName, final String pOldEmail, final String pNewEmail, final int pOldEmailKey, final int pNewEmailKey) {
+        String htmlText1 = Resources.getChangeEmailMail(pName, pOldEmailKey, true);
+        sendMail(pName, pOldEmail, "DHBW Kino - Email ändern", htmlText1);
+
+        String htmlText2 = Resources.getChangeEmailMail(pName, pNewEmailKey, false);
+        sendMail(pName, pNewEmail, "DHBW Kino - Email ändern", htmlText2);
+    }
+
     /**
      * Sendet eine verschlüsselte Email über den angegeben SMTP-Server.
      *
