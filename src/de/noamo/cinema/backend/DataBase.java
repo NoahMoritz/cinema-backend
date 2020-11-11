@@ -766,6 +766,7 @@ abstract class DataBase {
             jsonObject.addProperty("name", resultSet1.getString("name"));
             jsonObject.addProperty("email", resultSet1.getString("email"));
             jsonObject.addProperty("erstellt", resultSet1.getTimestamp("erstellt").toString());
+            jsonObject.addProperty("rolle", resultSet1.getInt("rolle"));
 
             // Adressen abfragen und der Rückgabe hinzufügen
             JsonArray adressen = new JsonArray();
