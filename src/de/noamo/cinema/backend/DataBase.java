@@ -178,7 +178,7 @@ abstract class DataBase {
      */
     static String createUser(String pPasswort, String pEmail, String pName, boolean aktiv) throws SQLException, BadRequestException, ConflictException {
         // Parameterprüfung
-        if (pPasswort.length() <= MIN_PASSWORD_LENGTH)
+        if (pPasswort.length() < MIN_PASSWORD_LENGTH)
             throw new BadRequestException("Das Passwort muss mindestens " + MIN_PASSWORD_LENGTH + " Zeichen haben!");
         if (!pEmail.matches("^(.+)@(.+)$"))
             throw new BadRequestException("Die eingegebene Email-Adresse ist ungültig!");
@@ -689,6 +689,40 @@ abstract class DataBase {
             throw new ConflictException("Zu der angegeben Email-Adresse existiert bereits ein anderes Konto!");
         }
         return "Ok";
+    }
+
+    static String updatePasswort(String pAuthCode, JsonObject pJsonObject) throws BadRequestException, SQLException, UnauthorisedException {
+        try {
+            String oldPasswort = pJsonObject.get("oldPasswort").getAsString();
+            String newPasswort = pJsonObject.get("newPasswort").getAsString();
+            if (oldPasswort.length() < MIN_PASSWORD_LENGTH || newPasswort.length() < MIN_PASSWORD_LENGTH)
+                throw new BadRequestException("Passwörter haben eine Mindestlänge von " + MIN_PASSWORD_LENGTH + " Zeichen");
+            try (Connection connection = basicDataSource.getConnection();
+                 PreparedStatement preparedStatement = connection.prepareStatement("UPDATE konten SET passwort='" + DigestUtils.md5Hex(newPasswort) +
+                         "' WHERE benutzerid = (SELECT benutzerid FROM authCodes WHERE auth_code='" + DigestUtils.md5Hex(pAuthCode) +
+                         "') AND passwort='" + DigestUtils.md5Hex(pAuthCode) + "';")) {
+                if (preparedStatement.executeUpdate() != 1) throw new UnauthorisedException("AuthCode ungültig");
+            }
+            return "Passwort wurde erfolgreich geändert";
+        } catch (ClassCastException | IllegalStateException | NullPointerException e) {
+            throw new BadRequestException("In der Anfrage fehlt das String-Attribut 'oldPasswort' oder 'newPasswort'");
+        }
+    }
+
+    static String updateName(String pAuthCode, JsonObject pJsonObject) throws BadRequestException, SQLException, UnauthorisedException {
+        try {
+            String name = pJsonObject.get("name").getAsString();
+            if (name.length() <= 5)
+                throw new BadRequestException("Bitte geben Sie Ihren vollständigen Vor- und Nachnamen ein");
+            try (Connection connection = basicDataSource.getConnection();
+                 PreparedStatement preparedStatement = connection.prepareStatement("UPDATE konten SET name='" + name +
+                         "' WHERE benutzerid = (SELECT benutzerid FROM authCodes WHERE auth_code='" + DigestUtils.md5Hex(pAuthCode) + "');")) {
+                if (preparedStatement.executeUpdate() != 1) throw new UnauthorisedException("AuthCode ungültig");
+            }
+            return "Name des Kontoinhabers wurde erfolgreich geändert";
+        } catch (ClassCastException | IllegalStateException | NullPointerException e) {
+            throw new BadRequestException("In der Anfrage fehlt das String-Attribut 'name'");
+        }
     }
 
     /**

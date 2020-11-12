@@ -7,9 +7,17 @@
 
 package de.noamo.cinema.backend;
 
+import org.apache.http.HttpResponse;
+import org.apache.http.client.methods.HttpPost;
+import org.apache.http.entity.ContentType;
+import org.apache.http.entity.StringEntity;
+import org.apache.http.impl.client.CloseableHttpClient;
+import org.apache.http.impl.client.HttpClients;
+
 import java.io.File;
 import java.io.IOException;
 import java.util.Scanner;
+import java.util.concurrent.LinkedBlockingQueue;
 
 /**
  * Einstieg in das Programm. Hier werden alle Dienste (die zu dem Backend gehören) gestartet.
@@ -23,6 +31,7 @@ public abstract class Start {
     private static String host;
     private static int restApiPort = 4567;
     private static int websocketPort = 56953;
+    private static final LinkedBlockingQueue<String> logBuffer = new LinkedBlockingQueue<>();
 
     /**
      * Fragt den Path des Zertifikates ab.
@@ -104,6 +113,18 @@ public abstract class Start {
     static void log(int pType, String pMessage) {
         String pre = (pType == 2 ? "[\033[0;31mFEHLER\033[0m] " : (pType == 1 ? "[\033[0;32mOK\033[0m] " : ""));
         System.out.println(pre + pMessage);
+
+        // Fehler an den WebHook senden
+        if (pType == 2) {
+            try {
+                CloseableHttpClient httpclient = HttpClients.createDefault();
+                HttpPost post = new HttpPost("https://discord.com/api/webhooks/776543813023825933/WlUTkRa4TnCoH7Bz601tMRv9ilIrRtDJO2FBfDqlUyJHbBXSUvjTdujoYbvQayAahkr2");
+                post.setEntity(new StringEntity("{\"content\": \"" + pre + pMessage + "\"}", ContentType.create("application/json", "UTF-8")));
+                HttpResponse response = httpclient.execute(post);
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
     }
 
     /**

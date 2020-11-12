@@ -148,7 +148,7 @@ abstract class RestServer {
 
         // SQL-Error
         exception(SQLException.class, (e, request, response) -> {
-            e.printStackTrace();
+            Start.log(2, e.getMessage());
             response.status(500);
             response.type(TEXT_PLAIN);
             response.body("Internal Server Error");
@@ -171,6 +171,8 @@ abstract class RestServer {
         post("/changeEmail/request", (req, res) -> DataBase.changeEmailRequest(req.headers("Auth"), gson.fromJson(req.body(), JsonObject.class)));
         post("/changeEmail/confirm", (req, res) -> DataBase.changeEmailConfirm(req.headers("Auth"), gson.fromJson(req.body(), JsonObject.class)));
         post("/deactivateAccount", (req, res) -> DataBase.kontoDeaktivieren(req.headers("Auth"), req.body()));
+        post("/changeName", (req, res) -> DataBase.updateName(req.headers("Auth"), gson.fromJson(req.body(), JsonObject.class)));
+        post("/changePasswort", (req, res) -> DataBase.updateName(req.headers("Auth"), gson.fromJson(req.body(), JsonObject.class)));
         get("/activate/:key", RestServer::activateAccount);
         get("/get-movies", ((req, res) -> DataBase.getAktiveFilmeCached()));
         get("/get-kategorien", (req, res) -> DataBase.getKategorienCached().toString());
