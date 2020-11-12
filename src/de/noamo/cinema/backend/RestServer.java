@@ -172,7 +172,7 @@ abstract class RestServer {
         post("/changeEmail/confirm", (req, res) -> DataBase.changeEmailConfirm(req.headers("Auth"), gson.fromJson(req.body(), JsonObject.class)));
         post("/deactivateAccount", (req, res) -> DataBase.kontoDeaktivieren(req.headers("Auth"), req.body()));
         post("/changeName", (req, res) -> DataBase.updateName(req.headers("Auth"), gson.fromJson(req.body(), JsonObject.class)));
-        post("/changePasswort", (req, res) -> DataBase.updateName(req.headers("Auth"), gson.fromJson(req.body(), JsonObject.class)));
+        post("/changePasswort", (req, res) -> DataBase.updatePasswort(req.headers("Auth"), gson.fromJson(req.body(), JsonObject.class)));
         get("/activate/:key", RestServer::activateAccount);
         get("/get-movies", ((req, res) -> DataBase.getAktiveFilmeCached()));
         get("/get-kategorien", (req, res) -> DataBase.getKategorienCached().toString());
