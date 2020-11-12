@@ -700,8 +700,9 @@ abstract class DataBase {
             try (Connection connection = basicDataSource.getConnection();
                  PreparedStatement preparedStatement = connection.prepareStatement("UPDATE konten SET passwort='" + DigestUtils.md5Hex(newPasswort) +
                          "' WHERE benutzerid = (SELECT benutzerid FROM authCodes WHERE auth_code='" + DigestUtils.md5Hex(pAuthCode) +
-                         "') AND passwort='" + DigestUtils.md5Hex(pAuthCode) + "';")) {
-                if (preparedStatement.executeUpdate() != 1) throw new UnauthorisedException("AuthCode ungültig");
+                         "') AND passwort='" + DigestUtils.md5Hex(oldPasswort) + "';")) {
+                if (preparedStatement.executeUpdate() != 1)
+                    throw new UnauthorisedException("AuthCode oder Passwort ungültig");
             }
             return "Passwort wurde erfolgreich geändert";
         } catch (ClassCastException | IllegalStateException | NullPointerException e) {
