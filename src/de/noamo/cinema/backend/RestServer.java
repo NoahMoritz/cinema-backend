@@ -146,9 +146,17 @@ abstract class RestServer {
             response.body(e.getMessage());
         });
 
+        // SQL-Error
+        exception(SQLException.class, (e, request, response) -> {
+            e.printStackTrace();
+            response.status(500);
+            response.type(TEXT_PLAIN);
+            response.body("Internal Server Error");
+        });
+
         // Error Pages
-        notFound("404 Not Found");
-        internalServerError("500 Internal Server Error");
+        notFound("Not Found");
+        internalServerError("Internal Server Error");
     }
 
     /**

@@ -27,6 +27,7 @@ import java.util.UUID;
  * @since 05.09.2020
  */
 abstract class DataBase {
+    private final static int MIN_PASSWORD_LENGTH = 9;
     private final static int DPCP2_MAX_CON_IDLE = 6;
     private final static int DPCP2_MAX_OPEN_STATEMENTS = 50;
     private final static int DPCP2_MIN_CON_IDLE = 1;
@@ -177,7 +178,8 @@ abstract class DataBase {
      */
     static String createUser(String pPasswort, String pEmail, String pName, boolean aktiv) throws SQLException, BadRequestException, ConflictException {
         // Parameterprüfung
-        if (pPasswort.length() <= 8) throw new BadRequestException("Das Passwort muss mehr als 8 Zeichen haben!");
+        if (pPasswort.length() <= MIN_PASSWORD_LENGTH)
+            throw new BadRequestException("Das Passwort muss mindestens " + MIN_PASSWORD_LENGTH + " Zeichen haben!");
         if (!pEmail.matches("^(.+)@(.+)$"))
             throw new BadRequestException("Die eingegebene Email-Adresse ist ungültig!");
         if (pName.length() <= 5)
@@ -421,6 +423,19 @@ abstract class DataBase {
         return movies.cache;
     }
 
+    /**
+     * Bestätigt die Änderung einer Email-Adresse unter zur Hilfe name der beiden Codes, die per
+     * {@link DataBase#changeEmailRequest(String, JsonObject)} versendet wurden. Das {@link JsonObject} benötigt dabei
+     * die Attribute {@code newEmailKey} und {@code oldEmailKey} als Integer-Werte.
+     *
+     * @param pAuthCode   Ein AuthCode, der einem Konto zugeordnet ist
+     * @param pJsonObject {@link JsonObject} mit den Attributen {@code newEmailKey} und {@code oldEmailKey} als Integer-Werte
+     * @return Eine Rückgabe direkt für den Benutzer (nur im Erfolgsfall)
+     * @throws SQLException          Falls ein Fehler mit der Verbindung zu der Datenbnk auftritt
+     * @throws BadRequestException   Falls die Anfrage ungültig ist
+     * @throws UnauthorisedException Falls der AuthCode ungültig ist
+     * @throws ConflictException     Falls die Email-Adresse bereits verwendet wird
+     */
     static String changeEmailConfirm(String pAuthCode, JsonObject pJsonObject) throws SQLException, BadRequestException, UnauthorisedException, ConflictException {
         try {
             int newEmailKey = pJsonObject.get("newEmailKey").getAsInt();
@@ -442,6 +457,9 @@ abstract class DataBase {
                 try (PreparedStatement preparedStatement2 = connection.prepareStatement("UPDATE konten SET email='" +
                         newEmail + "' WHERE benutzerid=" + benutzerid + ";")) {
                     preparedStatement2.executeUpdate();
+                } catch (SQLIntegrityConstraintViolationException s) {
+                    // TODO Sinnvoll wäre hier eine Verschiebung in den Request Block
+                    throw new ConflictException("Email-Adresse wird bereits von einem anderen Konto verwenden");
                 }
 
                 // Änderungseintrag löschen
@@ -449,17 +467,36 @@ abstract class DataBase {
                     preparedStatement2.executeUpdate();
                 }
             }
-            return "OK Email wurde geändert";
+            return "Email wurde geändert";
         } catch (NullPointerException | ClassCastException exception) {
             throw new BadRequestException("Es wurden nicht alle Attribute erfolgreich mitgegeben. Notwendig sind (als Integer)" +
                     " 'newEmailKey' und 'oldEmailKey'");
         }
     }
 
+    /**
+     * Fordert an, dass die Email von dem, dem AuthCode zugeordneten, Konto geändert wird. Das {@link JsonObject}
+     * benötigt die Attribute {@code passwort} und {@code newEmail}. Danach werden per
+     * {@link Mail#sendEmailChangeMail(String, String, String, int, int)} Emails
+     * an die aktuelle und neue Email gesendet, die dann wiederrum für die Bestätigung mit
+     * {@link DataBase#changeEmailConfirm(String, JsonObject)} benötigt werden.
+     *
+     * @param pAuthCode   Ein AuthCode, der einem Konto zugeordnet ist
+     * @param pJsonObject Ein {@link JsonObject} mit den Attributen {@code passwort} und {@code newEmail}
+     * @return Eine Bestätigung mit Anweisungen für das weitere Vorgehen (für die Rückgabe direkt an den Client)
+     * @throws BadRequestException   Falls das {@code passwort}-Attribut zu kurz/nicht vorhanden oder das {@code newEmail}-Attribut zu kurz/nicht vorhanden ist
+     * @throws SQLException          Falls ein Fehler in der Verbindung zu der Datenbank auftritt
+     * @throws UnauthorisedException Falls der AuthCode ungültig ist
+     */
     static String changeEmailRequest(String pAuthCode, JsonObject pJsonObject) throws BadRequestException, SQLException, UnauthorisedException {
         try {
+            // Parameter lesen und prüfen
             String passwort = pJsonObject.get("passwort").getAsString();
             String newEmail = pJsonObject.get("newEmail").getAsString();
+            if (!newEmail.matches("^(.+)@(.+)$")) throw new BadRequestException("Email-Adresse ungültig");
+            if (passwort.length() < MIN_PASSWORD_LENGTH)
+                throw new BadRequestException("Das Passwort muss mindestens als " + MIN_PASSWORD_LENGTH + " Zeichen haben!");
+
             try (Connection connection = basicDataSource.getConnection();
                  PreparedStatement preparedStatement1 = connection.prepareStatement("SELECT benutzerid, email, name " +
                          "FROM konten WHERE benutzerid = (SELECT benutzerid FROM authCodes WHERE auth_code = '" + DigestUtils.md5Hex(pAuthCode) +
@@ -479,18 +516,20 @@ abstract class DataBase {
                 }
 
                 // Neuen Datensatz einfügen
-                try (PreparedStatement preparedStatement3 = connection.prepareStatement("INSERT INTO changeEmail(benutzerid, alte_email, neue_email, alte_email_key, neue_email_key) VALUES(" + benutzerid + ", '" + oldEmail +
-                        "', '" + newEmail + "', " + oldEmailKey + ", " + newEmailKey + ");");) {
+                try (PreparedStatement preparedStatement3 = connection.prepareStatement("INSERT INTO changeEmail(benutzerid, " +
+                        "neue_email, alte_email_key, neue_email_key) VALUES(" + benutzerid +
+                        ", '" + newEmail + "', " + oldEmailKey + ", " + newEmailKey + ");")) {
                     preparedStatement3.executeUpdate();
                 }
 
-                // Mails senden
+                // Mails versenden
                 Mail.sendEmailChangeMail(name, oldEmail, newEmail, oldEmailKey, newEmailKey);
+
+                // Rückgabe
+                return "Sie haben jewals eine Mail an Ihre alte und neue Adresse erhalten. Bitte bestätigen Sie damit die Änderung über /changeEmail/confirm";
             }
-            return "OK Bitte senden bestätigen Sie die Änderung über /changeEmail/confirm";
-        } catch (NullPointerException | ClassCastException exception) {
-            throw new BadRequestException("Es wurden nicht alle Attribute erfolgreich mitgegeben. Notwendig sind (als Strings)" +
-                    " 'passwort' und 'newEmail'");
+        } catch (NullPointerException | ClassCastException exception) { // Attribute können nicht aus dem JsonObjekt gelesen werden
+            throw new BadRequestException("Es wurden nicht alle Attribute erfolgreich mitgegeben. Notwendig sind (als Strings)" + " 'passwort' und 'newEmail'");
         }
     }
 
@@ -633,8 +672,8 @@ abstract class DataBase {
             throw new BadRequestException("Die neue Email-Adresse ist ungültig!");
         if (name != null && name.length() <= 5)
             throw new BadRequestException("Bitte geben Sie Ihren vollständigen Namen (Vor- und Nachname) ein!");
-        if (passwort != null && passwort.length() <= 8)
-            throw new BadRequestException("Das Passwort muss mehr als 8 Zeichen haben!");
+        if (passwort != null && passwort.length() < MIN_PASSWORD_LENGTH)
+            throw new BadRequestException("Das Passwort muss mindestens " + MIN_PASSWORD_LENGTH + " Zeichen haben!");
 
         // In String formatieren
         String update = (email == null ? "" : "email='" + email + "'");
