@@ -794,6 +794,8 @@ abstract class DataBase {
                     p.executeBatch();
                 }
 
+                Mail.sendTicketMail(rName, email, vorstellungsId + selectedSeats.toString());
+
                 return "Viel Spaß mit Ihren Tickets";
             }
         } catch (ClassCastException | IllegalStateException | NullPointerException e) {

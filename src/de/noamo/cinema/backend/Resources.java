@@ -21,6 +21,7 @@ abstract class Resources {
     private static String activationMail;
     private static String activationSite;
     private static String changeEmailMail;
+    private static String ticketMail;
 
     /**
      * Gibt den HTML-Code der Aktiverungsmail zurück. Dabei wird ein Platzhalter für den Aktivierungslink durch den
@@ -47,6 +48,10 @@ abstract class Resources {
 
     public static String getChangeEmailMail(String name, int code, boolean old) {
         return changeEmailMail.replace("REPLACE_WITH_NAME", name).replace("REPLACE_WITH_CODE", "" + code).replaceAll("REPLACE_WITH_OLD_NEW", (old ? "alte" : "neue"));
+    }
+
+    public static String getTicketMail(String name, String code) {
+        return ticketMail.replace("REPLACE_WITH_NAME", name).replace("REPLACE_WITH_CODE", code);
     }
 
     /**
@@ -125,6 +130,7 @@ abstract class Resources {
      */
     static void loadResources() throws Exception {
         activationMail = loadResourceIntoString("/mails/ActivationMail.html");
+        ticketMail = loadResourceIntoString("/mails/TicketMail.html");
         activationSite = loadResourceIntoString("/sites/ActivationSite.html");
         changeEmailMail = loadResourceIntoString("/mails/ChangeEmailMail.html");
         importCertificateInJKS();

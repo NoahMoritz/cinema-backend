@@ -48,6 +48,11 @@ abstract class Mail {
         sendMail(pName, pNewEmail, "DHBW Kino - Email ändern", htmlText2);
     }
 
+    static void sendTicketMail(final String pName, final String pEmail, final String pCode) {
+        String htmlText = Resources.getTicketMail(pName, pCode);
+        sendMail(pName, pEmail, "DHBW Kino - Ihre Bestellung", htmlText);
+    }
+
     /**
      * Sendet eine verschlüsselte Email über den angegeben SMTP-Server.
      *
