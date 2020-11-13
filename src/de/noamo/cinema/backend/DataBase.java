@@ -698,7 +698,7 @@ abstract class DataBase {
     static String placeOrder(String authCode, JsonObject jsonObject) throws BadRequestException, SQLException, ConflictException, IOException {
         try {
             // Daten aus Json-Objekt einlesen
-            int presentationId = jsonObject.get("presentationId").getAsInt();
+            int vorstellungsId = jsonObject.get("presentationId").getAsInt();
             List<Integer> selectedSeats = new Gson().fromJson(jsonObject.get("selectedSeats").getAsJsonArray(), new TypeToken<List<Integer>>() {
             }.getType());
             String tempselectedSeats = selectedSeats.toString(), selectedSeatsString = tempselectedSeats.substring(1, tempselectedSeats.length() - 1);
@@ -713,7 +713,7 @@ abstract class DataBase {
             String rPlz = rechnung.get("plz").getAsString();
             String rStadt = rechnung.get("stadt").getAsString();
             String rTelefon = null;
-            if (rechnung.has("telefon")) rTelefon = rechnung.get("telefon").getAsString();
+            if (rechnung.has("telefon")) rTelefon = rechnung.get("telefon").getAsString().replaceAll(" ", "");
 
             // Daten prüfen
             if (!email.matches("^(.+)@(.+)$")) throw new BadRequestException("Email-Adresse ungültig");
@@ -734,7 +734,7 @@ abstract class DataBase {
                 try (PreparedStatement p = connection.prepareStatement("SELECT * FROM saalPlaetze LEFT " +
                         "JOIN (SELECT platzid from bestellungPlaetze p INNER JOIN bestellungen b ON p.bestellnummer = " +
                         "b.bestellnummer WHERE vorstellungsid = ?) AS b ON saalPlaetze.platzid = b.platzid WHERE b.platzid IN (" + selectedSeatsString + ");")) {
-                    p.setInt(1, presentationId);
+                    p.setInt(1, vorstellungsId);
                     try (ResultSet resultSet = p.executeQuery()) {
                         while (resultSet.next()) {
                             if (resultSet.getInt("b.platzid") == 0)
@@ -750,7 +750,7 @@ abstract class DataBase {
                         "LEFT JOIN saalPlaetze ON saalPlaetze.saalid = diese_vorstellung.saalid " +
                         "INNER JOIN kategorien on saalPlaetze.kategorieid = kategorien.kategorieid " +
                         "WHERE platzid IN (" + selectedSeatsString + ");")) {
-                    p.setInt(1, presentationId);
+                    p.setInt(1, vorstellungsId);
                     try (ResultSet resultSet = p.executeQuery()) {
                         if (!resultSet.next()) throw new BadRequestException("Ungültige Sitzplätze");
                         gesamtkosten = resultSet.getDouble("kosten");
@@ -764,8 +764,8 @@ abstract class DataBase {
                 try (PreparedStatement p = connection.prepareStatement("INSERT INTO bestellungen (vorstellungsid, " +
                         "benutzerid, email, anrede, name, strasse, plz, stadt, telefon, preis, bezahlt) VALUES (?,(SELECT benutzerid FROM " +
                         "authCodes WHERE auth_code = ?), ?, ?, ?, ?, ?, ?, ?, ?, ?)", Statement.RETURN_GENERATED_KEYS)) {
-                    p.setInt(1, presentationId);
-                    p.setString(2, authCode);
+                    p.setInt(1, vorstellungsId);
+                    p.setString(2, DigestUtils.md5Hex(authCode));
                     p.setString(3, email);
                     p.setString(4, rTitel);
                     p.setString(5, rName);
@@ -798,9 +798,6 @@ abstract class DataBase {
             }
         } catch (ClassCastException | IllegalStateException | NullPointerException e) {
             throw new BadRequestException("Es sind nicht alle notwendigen Attribute vorhanden");
-        } catch (Exception e) {
-            e.printStackTrace();
-            return null;
         }
     }
 
@@ -974,6 +971,34 @@ abstract class DataBase {
                 }
             }
             if (adressen.size() > 0) jsonObject.add("adressen", adressen);
+
+            // Bestellungen mitgeben
+            JsonArray bestellungen = new JsonArray();
+            try (PreparedStatement preparedStatement3 = connection.prepareStatement("SELECT *, group_concat(reihe, platz) " +
+                    "AS plaetze FROM bestellungen INNER JOIN bestellungPlaetze bP on bestellungen.bestellnummer = bP.bestellnummer " +
+                    "LEFT JOIN saalPlaetze sP on bP.platzid = sP.platzid WHERE benutzerid=(SELECT benutzerid FROM authCodes " +
+                    "WHERE auth_code='" + DigestUtils.md5Hex(pAuthCode) + "') GROUP BY bestellungen.bestellnummer;");
+                 ResultSet resultSet3 = preparedStatement3.executeQuery()) {
+                while (resultSet3.next()) {
+                    JsonObject temp = new JsonObject();
+                    temp.addProperty("bestellnummer", resultSet3.getInt("bestellnummer"));
+                    temp.addProperty("bezahlt", resultSet3.getBoolean("bezahlt"));
+                    temp.addProperty("preis", resultSet3.getDouble("preis"));
+                    temp.addProperty("vorstellungsid", resultSet3.getInt("vorstellungsid"));
+                    temp.addProperty("saalid", resultSet3.getInt("saalid"));
+                    temp.addProperty("plaetze", resultSet3.getString("plaetze"));
+                    temp.addProperty("email", resultSet3.getString("email"));
+                    temp.addProperty("anrede", resultSet3.getString("anrede"));
+                    temp.addProperty("name", resultSet3.getString("name"));
+                    temp.addProperty("strasse", resultSet3.getString("strasse"));
+                    temp.addProperty("plz", resultSet3.getString("plz"));
+                    temp.addProperty("stadt", resultSet3.getString("stadt"));
+                    String tel = resultSet3.getString("telefon");
+                    if (tel != null) temp.addProperty("telefon", tel);
+                    bestellungen.add(temp);
+                }
+            }
+            if (bestellungen.size() > 0) jsonObject.add("bestellungen", bestellungen);
 
             // Zurückgeben
             return jsonObject;
