@@ -7,14 +7,18 @@
 
 package de.noamo.cinema.backend;
 
+import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.google.gson.reflect.TypeToken;
 import de.noamo.cinema.backend.exceptions.*;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.dbcp2.BasicDataSource;
 
+import java.io.IOException;
 import java.sql.*;
+import java.util.List;
 import java.util.Random;
 import java.util.UUID;
 
@@ -691,6 +695,115 @@ abstract class DataBase {
         return "Ok";
     }
 
+    static String placeOrder(String authCode, JsonObject jsonObject) throws BadRequestException, SQLException, ConflictException, IOException {
+        try {
+            // Daten aus Json-Objekt einlesen
+            int presentationId = jsonObject.get("presentationId").getAsInt();
+            List<Integer> selectedSeats = new Gson().fromJson(jsonObject.get("selectedSeats").getAsJsonArray(), new TypeToken<List<Integer>>() {
+            }.getType());
+            String tempselectedSeats = selectedSeats.toString(), selectedSeatsString = tempselectedSeats.substring(1, tempselectedSeats.length() - 1);
+            int paymentType = jsonObject.get("paymentType").getAsInt();
+            String paypalTransactionId = null;
+            if (paymentType == 1) paypalTransactionId = jsonObject.get("paypalTransactionId").getAsString();
+            String email = jsonObject.get("email").getAsString();
+            JsonObject rechnung = jsonObject.get("rechnung").getAsJsonObject();
+            String rTitel = rechnung.get("titel").getAsString();
+            String rName = rechnung.get("name").getAsString();
+            String rStrasse = rechnung.get("strasse").getAsString();
+            String rPlz = rechnung.get("plz").getAsString();
+            String rStadt = rechnung.get("stadt").getAsString();
+            String rTelefon = null;
+            if (rechnung.has("telefon")) rTelefon = rechnung.get("telefon").getAsString();
+
+            // Daten prüfen
+            if (!email.matches("^(.+)@(.+)$")) throw new BadRequestException("Email-Adresse ungültig");
+            if (selectedSeats.size() == 0) throw new BadRequestException("Keine Sitze ausgewählt");
+            if (paymentType > 1 || paymentType < 0) throw new BadRequestException("Ungültiges Zahlungsmittel");
+            if (rTitel.length() < 3) throw new BadRequestException("Ein Titel hat min. 3 Zeichen");
+            if (rName.length() < 5) throw new BadRequestException("Ein Name hat mindestens 5 Zeichen");
+            if (rStrasse.length() < 2) throw new BadRequestException("Eine Straße muss mindestens 2 Zeichen haben");
+            if (!rPlz.matches("^[0-9]{5}$")) throw new BadRequestException("Ungültige Postleitzahl");
+            if (rStadt.length() < 2) throw new BadRequestException("Eine Stadt muss mindestens 2 Zeichen haben");
+            if (rTelefon != null && !rTelefon.matches("^\\+(?:[0-9]⋅?){6,14}[0-9]$"))
+                throw new BadRequestException("Telefonnummer ungültig (Internationales Format erforderlich)");
+
+            // Datenbankverbindung starten
+            try (Connection connection = basicDataSource.getConnection()) {
+
+                // Verfügbarkeit der Plätze nachrpüfen
+                try (PreparedStatement p = connection.prepareStatement("SELECT * FROM saalPlaetze LEFT " +
+                        "JOIN (SELECT platzid from bestellungPlaetze p INNER JOIN bestellungen b ON p.bestellnummer = " +
+                        "b.bestellnummer WHERE vorstellungsid = ?) AS b ON saalPlaetze.platzid = b.platzid WHERE b.platzid IN (" + selectedSeatsString + ");")) {
+                    p.setInt(1, presentationId);
+                    try (ResultSet resultSet = p.executeQuery()) {
+                        while (resultSet.next()) {
+                            if (resultSet.getInt("b.platzid") == 0)
+                                throw new ConflictException("Der Platz" + resultSet.getString("reihe") + resultSet.getString("platz") + " ist bereits belegt!");
+                        }
+                    }
+                }
+
+                // Kosten für die Plätze berechnen und prüfen
+                double gesamtkosten;
+                try (PreparedStatement p = connection.prepareStatement("SELECT SUM(basis_preis*faktor+aufpreis) AS kosten " +
+                        "FROM (SELECT * FROM vorstellungen WHERE vorstellungsid = ?) diese_vorstellung " +
+                        "LEFT JOIN saalPlaetze ON saalPlaetze.saalid = diese_vorstellung.saalid " +
+                        "INNER JOIN kategorien on saalPlaetze.kategorieid = kategorien.kategorieid " +
+                        "WHERE platzid IN (" + selectedSeatsString + ");")) {
+                    p.setInt(1, presentationId);
+                    try (ResultSet resultSet = p.executeQuery()) {
+                        if (!resultSet.next()) throw new BadRequestException("Ungültige Sitzplätze");
+                        gesamtkosten = resultSet.getDouble("kosten");
+                        if (paymentType == 1 && !PayPal.confirmPayment(paypalTransactionId, gesamtkosten))
+                            throw new BadRequestException("PayPal Zahlung konnte nicht gefunden werden");
+                    }
+                }
+
+                // Bestellung eintragen
+                int bestellnummer;
+                try (PreparedStatement p = connection.prepareStatement("INSERT INTO bestellungen (vorstellungsid, " +
+                        "benutzerid, email, anrede, name, strasse, plz, stadt, telefon, preis, bezahlt) VALUES (?,(SELECT benutzerid FROM " +
+                        "authCodes WHERE auth_code = ?), ?, ?, ?, ?, ?, ?, ?, ?, ?)", Statement.RETURN_GENERATED_KEYS)) {
+                    p.setInt(1, presentationId);
+                    p.setString(2, authCode);
+                    p.setString(3, email);
+                    p.setString(4, rTitel);
+                    p.setString(5, rName);
+                    p.setString(6, rStrasse);
+                    p.setString(7, rPlz);
+                    p.setString(8, rStadt);
+                    if (rTelefon == null) p.setNull(9, Types.VARCHAR);
+                    else p.setString(9, rTelefon);
+                    p.setDouble(10, gesamtkosten);
+                    p.setBoolean(11, (paymentType == 1));
+                    p.executeUpdate();
+
+                    // Bestellnummer auslesen
+                    ResultSet rs = p.getGeneratedKeys();
+                    rs.next();
+                    bestellnummer = rs.getInt(1);
+                }
+
+                // Plätze in Datenbank einfügen
+                try (PreparedStatement p = connection.prepareStatement("INSERT INTO bestellungPlaetze(bestellnummer, platzid) VALUES (?, ?)")) {
+                    for (int temp : selectedSeats) {
+                        p.setInt(1, bestellnummer);
+                        p.setInt(2, temp);
+                        p.addBatch();
+                    }
+                    p.executeBatch();
+                }
+
+                return "Viel Spaß mit Ihren Tickets";
+            }
+        } catch (ClassCastException | IllegalStateException | NullPointerException e) {
+            throw new BadRequestException("Es sind nicht alle notwendigen Attribute vorhanden");
+        } catch (Exception e) {
+            e.printStackTrace();
+            return null;
+        }
+    }
+
     static String updatePasswort(String pAuthCode, JsonObject pJsonObject) throws BadRequestException, SQLException, UnauthorisedException {
         try {
             String oldPasswort = pJsonObject.get("oldPasswort").getAsString();
@@ -854,6 +967,7 @@ abstract class DataBase {
                     temp.addProperty("name", resultSet2.getString("name"));
                     temp.addProperty("strasse", resultSet2.getString("strasse"));
                     temp.addProperty("plz", resultSet2.getString("plz"));
+                    temp.addProperty("stadt", resultSet2.getString("stadt"));
                     String tel = resultSet2.getString("telefon");
                     if (tel != null) temp.addProperty("telefon", tel);
                     adressen.add(temp);
@@ -956,6 +1070,7 @@ abstract class DataBase {
             reVal.addProperty("basisPreis", resultSet1.getDouble("basis_preis"));
             reVal.addProperty("width", resultSet1.getInt("width"));
             reVal.addProperty("height", resultSet1.getInt("height"));
+            reVal.addProperty("vorstellungsbeginn", resultSet1.getTimestamp("vorstellungsbeginn").toString());
             reVal.add("kategorien", getKategorienCached());
 
             // Sitze abfragen

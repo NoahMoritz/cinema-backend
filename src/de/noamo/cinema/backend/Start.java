@@ -17,7 +17,6 @@ import org.apache.http.impl.client.HttpClients;
 import java.io.File;
 import java.io.IOException;
 import java.util.Scanner;
-import java.util.concurrent.LinkedBlockingQueue;
 
 /**
  * Einstieg in das Programm. Hier werden alle Dienste (die zu dem Backend gehören) gestartet.
@@ -30,8 +29,6 @@ public abstract class Start {
     private static String certificatePath;
     private static String host;
     private static int restApiPort = 4567;
-    private static int websocketPort = 56953;
-    private static final LinkedBlockingQueue<String> logBuffer = new LinkedBlockingQueue<>();
 
     /**
      * Fragt den Path des Zertifikates ab.
@@ -119,8 +116,13 @@ public abstract class Start {
             try {
                 CloseableHttpClient httpclient = HttpClients.createDefault();
                 HttpPost post = new HttpPost("https://discord.com/api/webhooks/776543813023825933/WlUTkRa4TnCoH7Bz601tMRv9ilIrRtDJO2FBfDqlUyJHbBXSUvjTdujoYbvQayAahkr2");
-                post.setEntity(new StringEntity("{\"content\": \"" + pre + pMessage + "\"}", ContentType.create("application/json", "UTF-8")));
+                post.setEntity(new StringEntity("{\"content\": \"" + pMessage + "\"}", ContentType.create("application/json", "UTF-8")));
                 HttpResponse response = httpclient.execute(post);
+
+                // Bei Fehlern diese anzeigen
+                if (response.getStatusLine().getStatusCode() > 299)
+                    System.out.println("Could not send Log to WebHook (" + response.getStatusLine().getStatusCode() + " " +
+                            response.getStatusLine().getReasonPhrase() + ")");
             } catch (Exception e) {
                 e.printStackTrace();
             }
@@ -134,15 +136,15 @@ public abstract class Start {
      */
     public static void main(String[] args) throws InterruptedException {
         // args lesen
-        String dbUrl = null;
+        String dbUrl = null, payPalClientId = null, payPalClientSecret = null;
         try {
             for (String s : args) {
                 if (s.toUpperCase().startsWith("DB=")) dbUrl = s.substring(3);
                 else if (s.toUpperCase().startsWith("MAIL=")) setupMail(s.substring(5));
                 else if (s.toUpperCase().startsWith("RESTPORT=")) restApiPort = Integer.parseInt(s.substring(9));
-                else if (s.toUpperCase().startsWith("WEBSOCKETPORT="))
-                    websocketPort = Integer.parseInt(s.substring(14));
                 else if (s.toUpperCase().startsWith("HOST=")) host = s.substring(5);
+                else if (s.toUpperCase().startsWith("PAYPALCLIENTID=")) payPalClientId = s.substring(15);
+                else if (s.toUpperCase().startsWith("PAYPALCLIENTSECRET=")) payPalClientSecret = s.substring(19);
                 else if (s.toUpperCase().startsWith("ZERTIFIKAT="))
                     certificatePath = interpretCertificatePath(s.substring(11));
             }
@@ -153,9 +155,9 @@ public abstract class Start {
 
         // Laden & Starten
         loadResources();
+        PayPal.setupPayPal(payPalClientId, payPalClientSecret);
         waitForDataBase(dbUrl);
         waitForRestApi();
-        //new Server(new InetSocketAddress(HOST, WEBSOCKET_PORT)).run();
     }
 
     /**
