@@ -29,6 +29,7 @@ public abstract class Start {
     private static String certificatePath;
     private static String host;
     private static int restApiPort = 4567;
+    private static String webHook = null;
 
     /**
      * Fragt den Path des Zertifikates ab.
@@ -112,10 +113,10 @@ public abstract class Start {
         System.out.println(pre + pMessage);
 
         // Fehler an den WebHook senden
-        if (pType == 2) {
+        if (pType == 2 && webHook != null) {
             try {
                 CloseableHttpClient httpclient = HttpClients.createDefault();
-                HttpPost post = new HttpPost("https://discord.com/api/webhooks/776543813023825933/WlUTkRa4TnCoH7Bz601tMRv9ilIrRtDJO2FBfDqlUyJHbBXSUvjTdujoYbvQayAahkr2");
+                HttpPost post = new HttpPost(webHook);
                 post.setEntity(new StringEntity("{\"content\": \"" + pMessage + "\"}", ContentType.create("application/json", "UTF-8")));
                 HttpResponse response = httpclient.execute(post);
 
@@ -145,6 +146,7 @@ public abstract class Start {
                 else if (s.toUpperCase().startsWith("HOST=")) host = s.substring(5);
                 else if (s.toUpperCase().startsWith("PAYPALCLIENTID=")) payPalClientId = s.substring(15);
                 else if (s.toUpperCase().startsWith("PAYPALCLIENTSECRET=")) payPalClientSecret = s.substring(19);
+                else if (s.toUpperCase().startsWith("WEBHOOK=")) webHook = s.substring(8);
                 else if (s.toUpperCase().startsWith("ZERTIFIKAT="))
                     certificatePath = interpretCertificatePath(s.substring(11));
             }
