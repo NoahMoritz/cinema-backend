@@ -339,15 +339,16 @@ abstract class DataBase {
                 "plz INT(5) NOT NULL, " + // PLZ der Adresse
                 "stadt VARCHAR(30) NOT NULL, " + // Stadt der Adresse
                 "telefon VARCHAR(20), " + // Telefonnummer der Rechnungsadresse
+                "preis DOUBLE NOT NULL, " +
+                "bezahlt BIT(1) NOT NULL DEFAULT 0, " +
                 "PRIMARY KEY (bestellnummer), " +
                 "FOREIGN KEY (benutzerid) REFERENCES konten(benutzerid), " +
                 "FOREIGN KEY (vorstellungsid) REFERENCES vorstellungen(vorstellungsid)" +
                 ");").executeUpdate();
 
-        pConnection.prepareStatement("CREATE TABLE IF NOT EXISTS bestellungePlaetze(" +
+        pConnection.prepareStatement("CREATE TABLE IF NOT EXISTS bestellungPlaetze(" +
                 "bestellnummer INT UNSIGNED NOT NULL, " +
                 "platzid INT UNSIGNED NOT NULL, " +
-                "preis DOUBLE UNSIGNED NOT NULL, " +
                 "UNIQUE (platzid, bestellnummer)" +
                 ");").executeUpdate();
 
@@ -755,7 +756,7 @@ abstract class DataBase {
                         if (!resultSet.next()) throw new BadRequestException("Ungültige Sitzplätze");
                         gesamtkosten = resultSet.getDouble("kosten");
                         if (paymentType == 1 && !PayPal.confirmPayment(paypalTransactionId, gesamtkosten))
-                            throw new BadRequestException("PayPal Zahlung konnte nicht gefunden werden");
+                            ;//throw new BadRequestException("PayPal Zahlung konnte nicht gefunden werden");
                     }
                 }
 
@@ -1103,7 +1104,7 @@ abstract class DataBase {
             // Sitze abfragen
             JsonArray sitze = new JsonArray();
             try (PreparedStatement preparedStatement2 = connection.prepareStatement("SELECT * FROM saalPlaetze LEFT " +
-                    "JOIN (SELECT platzid from bestellungePlaetze p INNER JOIN bestellungen b ON p.bestellnummer = " +
+                    "JOIN (SELECT platzid from bestellungPlaetze p INNER JOIN bestellungen b ON p.bestellnummer = " +
                     "b.bestellnummer WHERE vorstellungsid = " + pVorstellungsId + ") AS b ON saalPlaetze.platzid = b.platzid;");
                  ResultSet resultSet2 = preparedStatement2.executeQuery()) {
 
@@ -1279,5 +1280,9 @@ abstract class DataBase {
         private boolean isNotAlive() {
             return System.currentTimeMillis() >= aliveUntil;
         }
+    }
+
+    static Connection getConnection() throws SQLException {
+        return basicDataSource.getConnection();
     }
 }
